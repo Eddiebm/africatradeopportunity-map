@@ -1,7 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { requirePlatformRoleOrResponse } from "../../../../lib/auth/current-user";
 import { getDb } from "../../../../db";
-import { adminAuditEvents, dealDocuments, deals, marketRequests, matchCandidates, verificationChecks } from "../../../../db/schema";
+import { adminAuditEvents, dealDocuments, deals, introductions, marketRequests, matchCandidates, organizations, verificationChecks } from "../../../../db/schema";
 
 const REVIEWER_ROLES = ["administrator", "verification_analyst"] as const;
 
@@ -11,20 +11,24 @@ const allowed: Record<string, string[]> = {
   check: ["required", "submitted", "verified", "failed"],
   document: ["required", "submitted", "approved", "rejected"],
   match: ["awaiting_counterparty", "mutual_interest", "approved", "rejected"],
+  organization: ["reported", "under_review", "verified", "rejected"],
+  introduction: ["awaiting_consent", "pending_review", "approved", "rejected"],
 };
 
 export async function GET(request: Request) {
   const auth = await requirePlatformRoleOrResponse(request, [...REVIEWER_ROLES]);
   if (auth instanceof Response) return auth;
   const db = getDb();
-  const [dealRows, requestRows, checks, documents, matches] = await Promise.all([
+  const [dealRows, requestRows, checks, documents, matches, organizationRows, introductionRows] = await Promise.all([
     db.select().from(deals).orderBy(desc(deals.id)).limit(100),
     db.select().from(marketRequests).orderBy(desc(marketRequests.id)).limit(100),
     db.select().from(verificationChecks).orderBy(desc(verificationChecks.id)).limit(300),
     db.select().from(dealDocuments).orderBy(desc(dealDocuments.id)).limit(300),
     db.select().from(matchCandidates).orderBy(desc(matchCandidates.createdAt)).limit(200),
+    db.select().from(organizations).orderBy(desc(organizations.id)).limit(200),
+    db.select().from(introductions).orderBy(desc(introductions.createdAt)).limit(200),
   ]);
-  return Response.json({ deals: dealRows, requests: requestRows, checks, documents, matches });
+  return Response.json({ deals: dealRows, requests: requestRows, checks, documents, matches, organizations: organizationRows, introductions: introductionRows });
 }
 
 export async function PATCH(request: Request) {
@@ -41,6 +45,37 @@ export async function PATCH(request: Request) {
   if (!allowed[body.entity].includes(status)) return Response.json({ error: "Invalid status." }, { status: 400 });
 
   const db = getDb();
+
+  // introductions.id is also a text primary key (e.g. "I-M-12-7"), same
+  // reason as matchCandidates below — never coerced through numericId.
+  if (body.entity === "introduction") {
+    const introId = String(body.id ?? "").trim();
+    if (!introId) return Response.json({ error: "Invalid record." }, { status: 400 });
+    const [row] = await db.select().from(introductions).where(eq(introductions.id, introId)).limit(1);
+    if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
+    const now = new Date().toISOString();
+    const isApproval = status === "approved";
+    await db
+      .update(introductions)
+      .set({
+        status,
+        updatedAt: now,
+        ...(isApproval ? { approvedBy: admin.email, approvedAt: now, contactReleasedAt: now } : {}),
+      })
+      .where(eq(introductions.id, introId));
+    await db.insert(adminAuditEvents).values({
+      actorUserId: admin.id,
+      action: "status_change",
+      entityType: "introduction",
+      // Same integer-only entityId constraint as the match branch below —
+      // logging the demand organization id as the closest available FK.
+      entityId: row.demandOrganizationId,
+      fromStatus: row.status,
+      toStatus: status,
+      reason,
+    });
+    return Response.json({ ok: true });
+  }
 
   // matchCandidates.id is a text primary key (e.g. "M-12-7"), not a numeric
   // row id — it must never be coerced through Number()/numericId, unlike
@@ -90,6 +125,11 @@ export async function PATCH(request: Request) {
     if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
     await db.update(dealDocuments).set({ status, reviewedBy: admin.email, reviewedAt: new Date().toISOString() }).where(eq(dealDocuments.id, numericId));
     await db.insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "document", entityId: numericId, fromStatus: row.status, toStatus: status, reason });
+  } else if (body.entity === "organization") {
+    const [row] = await db.select().from(organizations).where(eq(organizations.id, numericId)).limit(1);
+    if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
+    await db.update(organizations).set({ verificationStatus: status }).where(eq(organizations.id, numericId));
+    await db.insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "organization", entityId: numericId, fromStatus: row.verificationStatus, toStatus: status, reason });
   } else {
     return Response.json({ error: "Invalid record." }, { status: 400 });
   }

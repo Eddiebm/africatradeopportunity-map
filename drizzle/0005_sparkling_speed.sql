@@ -1,0 +1,1 @@
+ALTER TABLE `market_requests` ADD `organization_id` integer REFERENCES organizations(id);

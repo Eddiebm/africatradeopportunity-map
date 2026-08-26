@@ -129,6 +129,13 @@ export const rateLimitAttempts = sqliteTable("rate_limit_attempts", {
 export const marketRequests = sqliteTable("market_requests", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   ownerEmail: text("owner_email"),
+  // Nullable: a listing can be posted without an organization (kept for
+  // backward compatibility with every listing created before Phase 2, and
+  // for a signed-in trader who hasn't created/joined an organization yet).
+  // Protected introductions (see `introductions` below) require both sides
+  // of a match to have one — a listing without one falls back to the
+  // original direct-consent flow on `matchCandidates`.
+  organizationId: integer("organization_id").references(() => organizations.id),
   role: text("role").notNull(),
   origin: text("origin").notNull(),
   destination: text("destination").notNull(),

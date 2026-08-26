@@ -1,7 +1,7 @@
-import { and, desc, eq, or } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { requireUserOrResponse } from "../../../lib/auth/current-user";
 import { getDb } from "../../../db";
-import { marketRequests, matchCandidates, notifications } from "../../../db/schema";
+import { introductions, marketRequests, matchCandidates, notifications } from "../../../db/schema";
 
 const compatible=(a:string,b:string)=>(a==="wanted"&&b==="for_sale")||(a==="for_sale"&&b==="wanted");
 const productKey=(s:string)=>s.toLowerCase().replace(/^\d{4,6}\s*[—-]?\s*/,"").replace(/[^a-z0-9]+/g," ").trim();
@@ -21,7 +21,14 @@ export async function GET(request:Request){
  ]);
  const suggestions=mine.flatMap(own=>all.filter(other=>other.id!==own.id&&compatible(own.role,other.role)).map(other=>({ownId:own.id,counterpart:{id:other.id,role:other.role,product:other.product,origin:other.origin,destination:other.destination,volume:other.volume,status:other.status},...score(own,other)}))).filter(x=>x.total>=65).sort((a,b)=>b.total-a.total);
  const relevant=matches.filter(m=>mine.some(x=>x.id===m.demandRequestId||x.id===m.supplyRequestId));
- const active=relevant.map(m=>{const demand=all.concat(mine).find(x=>x.id===m.demandRequestId),supply=all.concat(mine).find(x=>x.id===m.supplyRequestId);const ownIsDemand=mine.some(x=>x.id===m.demandRequestId);const counterpart=ownIsDemand?supply:demand;return {...m,counterpart:counterpart?{id:counterpart.id,product:counterpart.product,origin:counterpart.origin,destination:counterpart.destination,volume:counterpart.volume,contact:m.status==="approved"?counterpart.contact:"Contact withheld until mutual consent and review"}:null};});
+ // A match between two organization-linked listings gets a protected
+ // introduction record (see PATCH below) — contact release for those goes
+ // through introductions.contactReleasedAt, reviewed on its own admin desk
+ // tab, not the raw matchCandidates.status flip. Listings without an
+ // organization (either side) keep the original direct approval path.
+ const introRows=relevant.length?await db.select().from(introductions).where(inArray(introductions.matchId,relevant.map(m=>m.id))):[];
+ const introByMatch=new Map(introRows.map(i=>[i.matchId,i]));
+ const active=relevant.map(m=>{const demand=all.concat(mine).find(x=>x.id===m.demandRequestId),supply=all.concat(mine).find(x=>x.id===m.supplyRequestId);const ownIsDemand=mine.some(x=>x.id===m.demandRequestId);const counterpart=ownIsDemand?supply:demand;const intro=introByMatch.get(m.id);const released=intro?Boolean(intro.contactReleasedAt):m.status==="approved";return {...m,introduction:intro?{status:intro.status,contactReleased:Boolean(intro.contactReleasedAt)}:null,counterpart:counterpart?{id:counterpart.id,product:counterpart.product,origin:counterpart.origin,destination:counterpart.destination,volume:counterpart.volume,contact:released?counterpart.contact:"Contact withheld until mutual consent and review"}:null};});
  return Response.json({mine,suggestions:suggestions.slice(0,50),matches:active});
 }
 
@@ -41,5 +48,22 @@ export async function PATCH(req:Request){
  const auth=await requireUserOrResponse(req);if(auth instanceof Response)return auth;const user=auth;const body=await req.json() as {matchId?:string};if(!body.matchId)return Response.json({error:"Match required."},{status:400});
  const db=getDb();const [match]=await db.select().from(matchCandidates).where(eq(matchCandidates.id,body.matchId)).limit(1);if(!match)return Response.json({error:"Match not found."},{status:404});
  const owned=await db.select().from(marketRequests).where(and(eq(marketRequests.ownerEmail,user.email),or(eq(marketRequests.id,match.demandRequestId),eq(marketRequests.id,match.supplyRequestId)))).limit(1);if(!owned[0])return Response.json({error:"Not authorized."},{status:403});const now=new Date().toISOString();
- const demandOwned=owned[0].id===match.demandRequestId;const demandAt=demandOwned?now:match.demandInterestAt,supplyAt=demandOwned?match.supplyInterestAt:now;await db.update(matchCandidates).set({demandInterestAt:demandAt,supplyInterestAt:supplyAt,status:demandAt&&supplyAt?"mutual_interest":"awaiting_counterparty",updatedAt:now}).where(eq(matchCandidates.id,match.id));return Response.json({ok:true,status:demandAt&&supplyAt?"mutual_interest":"awaiting_counterparty"});
+ const demandOwned=owned[0].id===match.demandRequestId;const demandAt=demandOwned?now:match.demandInterestAt,supplyAt=demandOwned?match.supplyInterestAt:now;const status=demandAt&&supplyAt?"mutual_interest":"awaiting_counterparty";
+ await db.update(matchCandidates).set({demandInterestAt:demandAt,supplyInterestAt:supplyAt,status,updatedAt:now}).where(eq(matchCandidates.id,match.id));
+ // Mutual interest between two organization-linked listings starts a
+ // protected introduction — both sides just gave the consent an
+ // introduction requires; an administrator still has to approve it before
+ // contact is released (see the "Introductions" admin desk tab). Listings
+ // without an organization on either side keep the original direct-match
+ // approval path untouched.
+ if(status==="mutual_interest"){
+  const [[demandListing],[supplyListing]]=await Promise.all([db.select().from(marketRequests).where(eq(marketRequests.id,match.demandRequestId)).limit(1),db.select().from(marketRequests).where(eq(marketRequests.id,match.supplyRequestId)).limit(1)]);
+  if(demandListing?.organizationId&&supplyListing?.organizationId){
+   const introId=`I-${match.id}`;
+   const [existing]=await db.select().from(introductions).where(eq(introductions.id,introId)).limit(1);
+   if(!existing)await db.insert(introductions).values({id:introId,matchId:match.id,demandOrganizationId:demandListing.organizationId,supplyOrganizationId:supplyListing.organizationId,demandConsentAt:now,supplyConsentAt:now,status:"pending_review"});
+   else if(existing.status==="awaiting_consent")await db.update(introductions).set({demandConsentAt:existing.demandConsentAt??now,supplyConsentAt:existing.supplyConsentAt??now,status:"pending_review",updatedAt:now}).where(eq(introductions.id,introId));
+  }
+ }
+ return Response.json({ok:true,status});
 }
