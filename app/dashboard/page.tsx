@@ -1,15 +1,16 @@
 import { desc, eq } from "drizzle-orm";
-import { requireChatGPTUser, chatGPTSignOutPath } from "../chatgpt-auth";
+import { requireUser } from "../../lib/auth/current-user";
 import { getDb } from "../../db";
 import { deals } from "../../db/schema";
+import SignOutLink from "../components/SignOutLink";
 
 export const dynamic = "force-dynamic";
 
 export default async function Dashboard() {
-  const user = await requireChatGPTUser("/dashboard");
+  const user = await requireUser("/dashboard");
   const rows = await getDb().select().from(deals).where(eq(deals.ownerEmail, user.email)).orderBy(desc(deals.id)).limit(100);
   return <main className="portal">
-    <header><div className="brand"><i>TS</i><span><b>TradeSafe Africa</b><small>Deal operations</small></span></div><nav><a href="/">Opportunity map</a><a href="/marketplace">Matches</a><a href="/notifications">Notifications</a><a href="/deal/new">Open a deal</a><a href="/disputes">Disputes</a><a href={chatGPTSignOutPath("/")}>Sign out</a></nav></header>
+    <header><div className="brand"><i>TS</i><span><b>TradeSafe Africa</b><small>Deal operations</small></span></div><nav><a href="/">Opportunity map</a><a href="/marketplace">Matches</a><a href="/notifications">Notifications</a><a href="/deal/new">Open a deal</a><a href="/disputes">Disputes</a><SignOutLink /></nav></header>
     <section className="portalhead"><div><p>MY TRADE DESK</p><h1>Deals requiring action</h1></div><aside><b>{rows.length}</b><span>active records</span></aside></section>
     <section className="dealboard">
       {rows.length ? rows.map((deal) => <a href={`/deal/${deal.id}`} className="dealcard" key={deal.id}>

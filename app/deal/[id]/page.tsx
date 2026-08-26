@@ -1,5 +1,5 @@
 import { and, asc, eq } from "drizzle-orm";
-import { requireChatGPTUser } from "../../chatgpt-auth";
+import { requireUser } from "../../../lib/auth/current-user";
 import { getDb } from "../../../db";
 import { dealCosts, dealDocuments, dealEvents, deals, documentFiles, milestones, verificationChecks } from "../../../db/schema";
 import DocumentUploadRow from "../../components/DocumentUploadRow";
@@ -7,7 +7,7 @@ import DocumentUploadRow from "../../components/DocumentUploadRow";
 export const dynamic = "force-dynamic";
 
 export default async function DealRoom({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requireChatGPTUser("/dashboard");
+  const user = await requireUser("/dashboard");
   const id = Number((await params).id);
   const db = getDb();
   const [deal] = await db.select().from(deals).where(and(eq(deals.id, id), eq(deals.ownerEmail, user.email))).limit(1);
