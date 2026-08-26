@@ -33,7 +33,6 @@ class ConsoleEmailProvider implements EmailProvider {
   readonly name = "console";
 
   async send(message: EmailMessage): Promise<EmailSendResult> {
-    // eslint-disable-next-line no-console
     console.log(`[email:not-delivered] to=${message.to} subject=${JSON.stringify(message.subject)}\n${message.text}`);
     return {
       delivered: false,
