@@ -6,6 +6,7 @@ import { clientIp, consumeRateLimit } from "../../../../lib/auth/rate-limit";
 import { createSession, sessionCookieHeader } from "../../../../lib/auth/session";
 import { generateRawToken, hashToken, minutesFromNow } from "../../../../lib/auth/tokens";
 import { getEmailProvider } from "../../../../lib/email";
+import { turnstileEnforced, verifyTurnstile } from "../../../../lib/turnstile";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -20,6 +21,14 @@ export async function POST(request: Request) {
     body = (await request.json()) as Record<string, unknown>;
   } catch {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
+  }
+
+  const turnstile = await verifyTurnstile(
+    typeof body.turnstileToken === "string" ? body.turnstileToken : undefined,
+    ip,
+  );
+  if (!turnstile.success && turnstileEnforced()) {
+    return Response.json({ error: "Verification failed. Please try again." }, { status: 400 });
   }
 
   const email = String(body.email ?? "").trim().toLowerCase();

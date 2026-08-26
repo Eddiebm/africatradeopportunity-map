@@ -5,3 +5,15 @@
 # HMAC key signing the session cookie. Generate one with:
 #   openssl rand -base64 32
 SESSION_SECRET=replace-with-a-random-32-byte-base64-value
+
+# Cloudflare Turnstile secret key (server-side), used to verify CAPTCHA
+# tokens submitted by public forms (registration, market-request posting).
+# Get a real one at dash.cloudflare.com -> Turnstile -> add a widget ->
+# copy the "Secret Key" (the "Site Key" is separate and public — that one
+# is NEXT_PUBLIC_TURNSTILE_SITE_KEY, a build-time client var, not a
+# .dev.vars secret; see lib/turnstile.ts).
+# Defaults to unset/empty locally: with no key configured, verification is
+# honestly reported as "not checked" (never faked as passed) and is not
+# enforced as a hard rejection outside of production builds — see
+# lib/turnstile.ts's turnstileEnforced() for the exact fail-open/closed rule.
+TURNSTILE_SECRET_KEY=

@@ -1,5 +1,16 @@
 "use client";
 import { FormEvent, useState } from "react";
+import Script from "next/script";
+
+// Public site key for the Cloudflare Turnstile widget. Build-time only
+// (inlined via NEXT_PUBLIC_* — see vinext's env handling), empty by default.
+// No real Turnstile site is provisioned in this environment (no Cloudflare
+// dashboard access), so this defaults to "" and the widget below simply
+// doesn't render — the form still works, consistent with lib/turnstile.ts's
+// fail-open-when-unconfigured decision on the server side. Once a real
+// widget exists (dash.cloudflare.com -> Turnstile), set
+// NEXT_PUBLIC_TURNSTILE_SITE_KEY at build time to turn it on.
+const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
 
 export default function Register() {
   const [state, setState] = useState("");
@@ -16,6 +27,10 @@ export default function Register() {
         password: form.get("password"),
         displayName: form.get("displayName"),
         termsAccepted: form.get("termsAccepted") === "on",
+        // Cloudflare Turnstile injects this hidden input into the form
+        // itself once the widget below renders and the visitor completes
+        // the challenge; empty/absent when no site key is configured.
+        turnstileToken: form.get("cf-turnstile-response") || undefined,
       }),
     });
     const data = (await res.json()) as { error?: string };
@@ -68,6 +83,15 @@ export default function Register() {
           I agree to the <a href="/legal/terms" target="_blank" rel="noreferrer">Terms of Service</a> and{" "}
           <a href="/legal/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.
         </label>
+        {TURNSTILE_SITE_KEY && (
+          <>
+            {/* Requires "https://challenges.cloudflare.com" added to the
+               CSP's script-src and frame-src in proxy.ts — not done in this
+               change; the widget will not load until that lands. */}
+            <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" strategy="afterInteractive" async defer />
+            <div className="cf-turnstile" data-sitekey={TURNSTILE_SITE_KEY} />
+          </>
+        )}
         <button type="submit">Create account →</button>
         <strong>{state}</strong>
         <span style={{ fontSize: 11 }}>

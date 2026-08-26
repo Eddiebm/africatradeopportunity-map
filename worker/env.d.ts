@@ -16,10 +16,20 @@
 interface Env {
   /** HMAC key (32+ random bytes, base64) signing the session cookie. */
   SESSION_SECRET: string;
+  /**
+   * Cloudflare Turnstile secret key, used server-side to verify CAPTCHA
+   * tokens from public forms (registration, market-request posting). Get a
+   * real one at dash.cloudflare.com -> Turnstile. Unset/empty in this
+   * environment (no dashboard access yet) — see lib/turnstile.ts for how
+   * that is handled (verification is honestly reported as not-checked, and
+   * only enforced as a hard rejection in production builds).
+   */
+  TURNSTILE_SECRET_KEY: string;
 }
 
 declare namespace Cloudflare {
   interface Env {
     SESSION_SECRET: string;
+    TURNSTILE_SECRET_KEY: string;
   }
 }
