@@ -1,0 +1,1 @@
+ALTER TABLE `market_requests` ADD `owner_email` text;

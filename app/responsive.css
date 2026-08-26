@@ -1,0 +1,2 @@
+@media(max-width:900px){.tradesafe{grid-template-columns:1fr}.protect{grid-column:auto}.passgrid{grid-template-columns:1fr 1fr}}
+@media(max-width:700px){.tradesafe{margin:0}.checks{grid-template-columns:1fr}.protect{display:block}.protect label,.protect button{display:block;width:100%;margin-top:12px}.passport{margin:0 20px 40px;padding:20px}.passgrid,.milestones{grid-template-columns:1fr}.milestones>span{border-top:1px solid var(--line)}}
