@@ -1,3 +1,11 @@
+// DEPRECATED — being removed as part of the production rebuild.
+// This module trusts the `oai-authenticated-user-*` headers that OpenAI's
+// "Sites" reverse proxy injects; it does not work standalone on Cloudflare
+// and every real permission check must not depend on it. Replace any
+// remaining call site with lib/auth/current-user.ts
+// (getCurrentUser/requireUser for Server Components,
+// getCurrentUserFromRequest/requireUserOrResponse for Route Handlers) and
+// delete this file once nothing imports it. Tracked in docs/AUDIT.md.
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 

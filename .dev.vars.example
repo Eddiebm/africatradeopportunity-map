@@ -1,0 +1,7 @@
+# Copy this file to .dev.vars (gitignored) for local `vinext dev` / `wrangler dev`.
+# In every real environment these are set with `wrangler secret put <NAME>`,
+# never committed. See docs/DEPLOYMENT.md.
+
+# HMAC key signing the session cookie. Generate one with:
+#   openssl rand -base64 32
+SESSION_SECRET=replace-with-a-random-32-byte-base64-value
