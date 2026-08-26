@@ -1,6 +1,131 @@
 import { sql } from "drizzle-orm";
 import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+// ---------------------------------------------------------------------------
+// Identity, sessions and platform-level authorization.
+//
+// Two kinds of role live in this schema:
+//  - `users.platformRole`: staff roles that are not scoped to any one
+//    organization (administrator, verification analyst). Null for ordinary
+//    traders.
+//  - `organizationMembers.role`: the marketplace-participant role a user
+//    holds within one organization (trader, buyer, supplier, freight
+//    provider, inspector, broker, partner institution). A user can belong to
+//    more than one organization with different roles in each.
+// Every server-side authorization check must read one of these two columns —
+// never a client-supplied role, email or id. See lib/auth/current-user.ts.
+// ---------------------------------------------------------------------------
+
+export const PLATFORM_ROLES = ["administrator", "verification_analyst"] as const;
+export type PlatformRole = (typeof PLATFORM_ROLES)[number];
+
+export const ORGANIZATION_ROLES = [
+  "trader",
+  "buyer",
+  "supplier",
+  "freight_provider",
+  "inspector",
+  "broker",
+  "partner_institution",
+] as const;
+export type OrganizationRole = (typeof ORGANIZATION_ROLES)[number];
+
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  displayName: text("display_name").notNull().default(""),
+  // Staff-only, organization-independent role. Null for ordinary traders —
+  // their capabilities come entirely from organizationMembers.role.
+  platformRole: text("platform_role", { enum: PLATFORM_ROLES }),
+  emailVerifiedAt: text("email_verified_at"),
+  status: text("status").notNull().default("active"), // active | suspended | deleted
+  suspendedReason: text("suspended_reason").notNull().default(""),
+  locale: text("locale").notNull().default("en"),
+  termsAcceptedAt: text("terms_accepted_at"),
+  deletionRequestedAt: text("deletion_requested_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const sessions = sqliteTable("sessions", {
+  // Random 256-bit id, hex-encoded. The session cookie carries this value
+  // plus an HMAC signature; only the signature is secret-dependent, so the
+  // id itself is safe to store in plaintext and index on.
+  id: text("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  expiresAt: text("expires_at").notNull(),
+  lastSeenAt: text("last_seen_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  ip: text("ip").notNull().default(""),
+  userAgent: text("user_agent").notNull().default(""),
+  revokedAt: text("revoked_at"),
+});
+
+export const emailVerificationTokens = sqliteTable("email_verification_tokens", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  // SHA-256 hash of the token; the raw token is only ever in the emailed
+  // link, never persisted.
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: text("expires_at").notNull(),
+  consumedAt: text("consumed_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const passwordResetTokens = sqliteTable("password_reset_tokens", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: text("expires_at").notNull(),
+  consumedAt: text("consumed_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const organizationMembers = sqliteTable("organization_members", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  organizationId: integer("organization_id").notNull().references(() => organizations.id),
+  userId: integer("user_id").notNull().references(() => users.id),
+  role: text("role", { enum: ORGANIZATION_ROLES }).notNull(),
+  status: text("status").notNull().default("active"), // invited | active | removed
+  invitedByUserId: integer("invited_by_user_id").references(() => users.id),
+  invitedEmail: text("invited_email").notNull().default(""),
+  invitedAt: text("invited_at"),
+  joinedAt: text("joined_at"),
+  removedAt: text("removed_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Immutable log of every material administrative decision (approvals,
+// rejections, status reversals, suspensions...). Written in addition to —
+// never instead of — the entity-specific event tables below
+// (dealEvents, disputeEvents, documentAuditEvents), which record normal
+// participant activity. This table is specifically for actions taken under
+// platform authority, and always requires a reason.
+export const adminAuditEvents = sqliteTable("admin_audit_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  actorUserId: integer("actor_user_id").notNull().references(() => users.id),
+  action: text("action").notNull(),
+  entityType: text("entity_type").notNull(),
+  entityId: integer("entity_id").notNull(),
+  fromStatus: text("from_status").notNull().default(""),
+  toStatus: text("to_status").notNull().default(""),
+  reason: text("reason").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Lightweight app-layer rate limiting (per key = e.g. "login:<ip>" or
+// "register:<ip>"), window-bucketed. This is a defense-in-depth backstop —
+// production deployments should also configure Cloudflare's edge Rate
+// Limiting / WAF rules, which this table cannot replace and which nothing
+// in application code can configure.
+export const rateLimitAttempts = sqliteTable("rate_limit_attempts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  bucketKey: text("bucket_key").notNull(),
+  windowStart: text("window_start").notNull(),
+  count: integer("count").notNull().default(1),
+});
+
 export const marketRequests = sqliteTable("market_requests", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   ownerEmail: text("owner_email"),
