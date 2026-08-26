@@ -1,18 +1,20 @@
 import { and, desc, eq } from "drizzle-orm";
-import { getChatGPTUser } from "../../chatgpt-auth";
+import { requireUserOrResponse } from "../../../lib/auth/current-user";
 import { getDb } from "../../../db";
 import { dealEvents, deals, disputeEvents, disputes, notifications } from "../../../db/schema";
 
-export async function GET() {
-  const user = await getChatGPTUser();
-  if (!user) return Response.json({ error: "Sign in required." }, { status: 401 });
+export async function GET(request: Request) {
+  const auth = await requireUserOrResponse(request);
+  if (auth instanceof Response) return auth;
+  const user = auth;
   const rows = await getDb().select().from(disputes).where(eq(disputes.openedByEmail, user.email)).orderBy(desc(disputes.id)).limit(100);
   return Response.json({ disputes: rows });
 }
 
 export async function POST(req: Request) {
-  const user = await getChatGPTUser();
-  if (!user) return Response.json({ error: "Sign in required." }, { status: 401 });
+  const auth = await requireUserOrResponse(req);
+  if (auth instanceof Response) return auth;
+  const user = auth;
   try {
     const body = await req.json() as Record<string, string | number>;
     const dealId = Number(body.dealId), category = String(body.category || "").trim(), description = String(body.description || "").trim();
