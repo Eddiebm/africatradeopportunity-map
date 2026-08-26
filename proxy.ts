@@ -19,7 +19,12 @@ const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 const CSP = [
   "default-src 'self'",
-  "script-src 'self'",
+  // https://challenges.cloudflare.com serves both the Turnstile widget
+  // script and the challenge iframe (lib/turnstile.ts +
+  // NEXT_PUBLIC_TURNSTILE_SITE_KEY) — harmless to allow even before a real
+  // site key is configured, since the widget just doesn't render then.
+  "script-src 'self' https://challenges.cloudflare.com",
+  "frame-src https://challenges.cloudflare.com",
   // Inline `style` attributes are used by a handful of pages for small
   // one-off layout tweaks (not a general escape hatch for untrusted
   // content — nothing user-supplied is ever rendered as a style attribute).

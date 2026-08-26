@@ -1,6 +1,6 @@
-import { desc } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { marketRequests } from "../../../db/schema";
+import { marketRequests, organizationMembers } from "../../../db/schema";
 import { getCurrentUserFromRequest } from "../../../lib/auth/current-user";
 import { clientIp } from "../../../lib/auth/rate-limit";
 import { turnstileEnforced, verifyTurnstile } from "../../../lib/turnstile";
@@ -16,7 +16,19 @@ export async function POST(req:Request){
     const turnstile=await verifyTurnstile(b.turnstileToken,clientIp(req));
     if(!turnstile.success&&turnstileEnforced()) return Response.json({error:"Verification failed. Please try again."},{status:400});
     if(required.some(k=>!b[k]?.trim())) return Response.json({error:"Complete every required field."},{status:400});
-    const [row]=await getDb().insert(marketRequests).values({ownerEmail:user?.email||null,role:b.role.trim(),origin:b.origin.trim(),destination:b.destination.trim(),product:b.product.trim(),hsCode:b.hsCode?.trim()||"",volume:b.volume.trim(),targetPrice:b.targetPrice?.trim()||"",contact:b.contact.trim(),status:user?"pending_verification":"pending_verification"}).returning({id:marketRequests.id,status:marketRequests.status});
+    const db=getDb();
+    // Never trust a client-supplied organization id at face value — only
+    // attach it if the signed-in user is actually an active member.
+    // Protected introductions (see app/api/marketplace/route.ts) require
+    // this to be set on both sides of a match; unset is fine too (falls
+    // back to the original direct-consent flow).
+    let organizationId:number|null=null;
+    const requestedOrgId=Number(b.organizationId);
+    if(user&&requestedOrgId){
+      const [membership]=await db.select().from(organizationMembers).where(and(eq(organizationMembers.organizationId,requestedOrgId),eq(organizationMembers.userId,user.id),eq(organizationMembers.status,"active"))).limit(1);
+      if(membership)organizationId=requestedOrgId;
+    }
+    const [row]=await db.insert(marketRequests).values({ownerEmail:user?.email||null,organizationId,role:b.role.trim(),origin:b.origin.trim(),destination:b.destination.trim(),product:b.product.trim(),hsCode:b.hsCode?.trim()||"",volume:b.volume.trim(),targetPrice:b.targetPrice?.trim()||"",contact:b.contact.trim(),status:user?"pending_verification":"pending_verification"}).returning({id:marketRequests.id,status:marketRequests.status});
     return Response.json({request:row},{status:201});
   }catch{return Response.json({error:"The verification desk is temporarily unavailable."},{status:500})}
 }
