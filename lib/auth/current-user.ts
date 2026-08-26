@@ -5,26 +5,11 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import type { PlatformRole } from "../../db/schema";
+import { loginPath } from "./paths";
 import { resolveSession, SESSION_COOKIE_NAME, type SessionUser } from "./session";
 
-export const LOGIN_PATH = "/login";
-
+export { LOGIN_PATH, loginPath } from "./paths";
 export type { SessionUser };
-
-function safeRelativeReturnPath(value: string): string {
-  if (!value.startsWith("/") || value.startsWith("//")) return "/";
-  try {
-    const url = new URL(value, "https://app.local");
-    if (url.origin !== "https://app.local") return "/";
-    return `${url.pathname}${url.search}${url.hash}`;
-  } catch {
-    return "/";
-  }
-}
-
-export function loginPath(returnTo = "/"): string {
-  return `${LOGIN_PATH}?return_to=${encodeURIComponent(safeRelativeReturnPath(returnTo))}`;
-}
 
 /** Read the current user in a Server Component / layout / page (not a
  * Route Handler — use getCurrentUserFromRequest there instead). */
