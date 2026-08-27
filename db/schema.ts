@@ -657,3 +657,50 @@ export const corridorTemplates = sqliteTable("corridor_templates", {
   createdByEmail: text("created_by_email").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+// Priority 6 (docs/production-readiness.md): "Implement transparent
+// verification levels." Deliberately a SEPARATE concept from
+// verificationChecks above — that table tracks per-deal, transaction-
+// specific checks (identity, buyer_authority, stock, ...); this tracks an
+// ORGANIZATION's standing facts (is this entity who it says it is, does
+// it actually have the business registration it claims) that persist
+// across many deals, not just one. The six levels are a progression —
+// see resolveOrganizationVerificationLevel in
+// lib/verification-levels.ts for exactly how "current level" is computed
+// from these rows (append-only, never updated in place — same
+// immutability discipline as corridor_templates above, for the same
+// reason: an audit history that could be silently edited isn't an audit
+// history).
+export const VERIFICATION_LEVELS = [
+  "identity",
+  "business_registration",
+  "address_bank_ownership",
+  "capability_inventory",
+  "independent_inspection",
+  "transaction_history",
+] as const;
+export type VerificationLevelKey = (typeof VERIFICATION_LEVELS)[number];
+
+export const organizationVerifications = sqliteTable("organization_verifications", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  organizationId: integer("organization_id").notNull().references(() => organizations.id),
+  levelKey: text("level_key").notNull(), // one of VERIFICATION_LEVELS
+  whatWasChecked: text("what_was_checked").notNull().default(""),
+  performedByEmail: text("performed_by_email").notNull().default(""),
+  evidenceFileId: integer("evidence_file_id").references(() => documentFiles.id),
+  source: text("source").notNull().default(""),
+  checkedAt: text("checked_at"),
+  expiresAt: text("expires_at"),
+  result: text("result").notNull().default("pending"), // pending | passed | failed
+  reviewerEmail: text("reviewer_email").notNull().default(""),
+  notes: text("notes").notNull().default(""),
+  // Per docs/AUDIT.md's AI boundary ("AI may extract, compare, summarize,
+  // and flag evidence. AI must not make final ... verification ...
+  // decisions"): true by default — an automated/AI-assisted check
+  // NEVER counts as 'passed' on its own without a human reviewer
+  // actually setting this false after confirming the result themselves.
+  // See app/api/admin/organization-verifications/route.ts for where this
+  // is enforced, not just documented.
+  humanReviewRequired: integer("human_review_required", { mode: "boolean" }).notNull().default(true),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

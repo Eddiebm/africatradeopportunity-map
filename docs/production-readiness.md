@@ -617,7 +617,112 @@ clean.
 
 ---
 
-## Priorities 6–13
+## Priority 6 — Risk-based verification
+
+**Status: verified.**
+
+**Files changed:** `db/schema.ts` (migration `0013`:
+`organization_verifications` table), `lib/verification-levels.ts` (new),
+`app/api/admin/organization-verifications/route.ts` (new),
+`app/api/organizations/[id]/verification-level/route.ts` (new),
+`app/api/admin/verification-recommendation/route.ts` (new),
+`tests/unit/verification-levels.test.ts` (new).
+
+**Migration:** `0013` — additive, one new table.
+
+**Deliberately a SEPARATE concept from the existing `verification_checks`
+table** (per-deal, transaction-specific checks like `buyer_authority` or
+`stock`) — this tracks an ORGANIZATION's standing facts across every
+deal it's ever part of, as the six-level progression the mission
+specifies (identity → business registration → address/bank ownership →
+capability/inventory → independent inspection → transaction history).
+
+**The progression is real, not cosmetic** — an organization's "current
+level" is the highest N such that levels 1..N are ALL passed,
+not-expired, human-reviewed facts. A passed level-3 fact with a gap at
+level 2 does NOT count toward level 3 — the org stays capped at whatever
+it last achieved contiguously. Proven both in a unit test and live in a
+real browser: recorded level 1 and level 3 (skipping level 2) for a real
+organization, confirmed the public API still reported level 1; then
+filled level 2, confirmed the level jumped to 3 in the same request
+cycle.
+
+**The AI boundary is enforced, not just documented**: `humanReviewRequired`
+defaults `true`, and a row with it left `true` never counts toward the
+level — proven live by recording an "AI document extraction" result with
+no human confirmation and confirming the org's level did not move. The
+only route that can ever set `humanReviewRequired: false` additionally
+requires a real `source` and `reviewerEmail` on that same request — an
+AI-flagged result cannot self-finalize by omission, and a human
+confirming one must be named, not just implied by which role the request
+came from.
+
+**Rules engine**: `recommendVerificationLevel()` is a pure function —
+transaction value, corridor tier (reusing Priority 5's
+`intelligence`/`operational`/`verified` tiers), product risk, first-time
+relationship, prior disputes, payment terms, and evidence quality each
+contribute an explainable, reasoned level addition, capped at 6. Its
+own `policyNote` states outright that these are this platform's own
+risk thresholds, not an external regulatory requirement — the same
+"never fabricate authority" discipline as everywhere else in this app.
+It is exposed via an API that WRITES NOTHING and enforces nothing — pure
+decision support for a human, matching "AI may extract, compare,
+summarize, and flag evidence. AI must not make final ... verification
+... decisions."
+
+**Public vs. admin split:** `GET /api/organizations/:id/verification-level`
+is unauthenticated (a counterparty deciding whether to trust an
+organization needs this without needing admin access — "transparent
+verification levels" only means something if it's actually visible) and
+returns ONLY the level number and which named levels were achieved —
+never the underlying evidence, notes, or reviewer identity, which stays
+behind `GET/POST /api/admin/organization-verifications` (administrator
+or verification_analyst only).
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (42, unchanged —
+no new pages this priority) · **110/110 tests** (19 new: level-0
+baseline, single-fact level-1 achievement, the gap-capping proof, the
+AI-boundary proof, expiration handling, append-only history proof
+across a failed-then-passed re-check, five rules-engine cases including
+the "every factor has a stated reason" check, and full auth/validation
+coverage on all three routes) · `build` clean.
+
+**Live browser/attack verification, not just unit tests:**
+- **Attack**: a real, non-reviewer trader account attempting
+  `POST /api/admin/organization-verifications` directly → 403.
+- A brand-new real organization confirmed at level 0 via the public
+  endpoint.
+- A real admin recorded a real level-1 fact; confirmed level 1 via the
+  public endpoint immediately after.
+- **The gap-capping behavior, live**: recorded level 3 (address/bank
+  ownership) while level 2 was still missing, confirmed via the public
+  API that the level stayed at 1, not 3 — then filled level 2 and
+  confirmed the level correctly jumped to 3.
+- **The AI-boundary behavior, live**: recorded a "passed" result with no
+  `humanReviewRequired` override (defaults `true`) and confirmed the
+  organization's level did not move.
+- The rules engine, called through the real authenticated API, for a
+  deliberately extreme high-risk profile → correctly capped at level 6
+  with a multi-factor, individually-reasoned breakdown.
+
+**Remaining risks, explicitly deferred:**
+- No UI for staff to record verifications or view an org's history — API
+  only, fully tested via direct calls.
+- The recommendation engine's inputs (`productRisk`, `paymentTerms`,
+  `evidenceQuality`) are supplied by the caller, not auto-derived from
+  deal data — `deals` has no product-risk or payment-terms field yet, so
+  wiring this into an actual deal-creation flow automatically is a
+  follow-on, not done here.
+- Recommended levels are not tied to any enforcement (e.g., blocking a
+  quote acceptance below the recommended level) — intentionally, per the
+  AI boundary; if a future priority wants an enforced gate, that's a
+  distinct, larger product decision this priority does not make.
+
+**Commit:** `pending`
+
+---
+
+## Priorities 7–13
 
 Not started. Worked next, one focused commit (or a few) per priority,
 each getting its own dated section here — never marked verified without
