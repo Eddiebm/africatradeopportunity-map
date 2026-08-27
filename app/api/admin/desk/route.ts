@@ -1,9 +1,10 @@
 import { desc, eq } from "drizzle-orm";
 import { requirePlatformRoleOrResponse } from "../../../../lib/auth/current-user";
 import { getDb } from "../../../../db";
-import { adminAuditEvents, dealDocuments, deals, introductions, marketRequests, matchCandidates, milestones, organizations, verificationChecks } from "../../../../db/schema";
+import { adminAuditEvents, dealDocuments, deals, disputeEvents, disputeMessages, disputes, introductions, marketRequests, matchCandidates, milestones, organizations, verificationChecks } from "../../../../db/schema";
 
 const REVIEWER_ROLES = ["administrator", "verification_analyst"] as const;
+const DISPUTE_PRIORITIES = ["normal", "high", "urgent"] as const;
 
 const allowed: Record<string, string[]> = {
   request: ["pending_verification", "contacted", "verified", "rejected"],
@@ -19,13 +20,14 @@ const allowed: Record<string, string[]> = {
   // by this — a licensed payment partner, not this platform, executes any
   // actual release.
   milestone: ["missing", "submitted", "verified"],
+  dispute: ["open", "investigating", "awaiting_response", "resolved", "closed"],
 };
 
 export async function GET(request: Request) {
   const auth = await requirePlatformRoleOrResponse(request, [...REVIEWER_ROLES]);
   if (auth instanceof Response) return auth;
   const db = getDb();
-  const [dealRows, requestRows, checks, documents, matches, organizationRows, introductionRows, milestoneRows] = await Promise.all([
+  const [dealRows, requestRows, checks, documents, matches, organizationRows, introductionRows, milestoneRows, disputeRows, disputeMessageRows] = await Promise.all([
     db.select().from(deals).orderBy(desc(deals.id)).limit(100),
     db.select().from(marketRequests).orderBy(desc(marketRequests.id)).limit(100),
     db.select().from(verificationChecks).orderBy(desc(verificationChecks.id)).limit(300),
@@ -34,8 +36,14 @@ export async function GET(request: Request) {
     db.select().from(organizations).orderBy(desc(organizations.id)).limit(200),
     db.select().from(introductions).orderBy(desc(introductions.createdAt)).limit(200),
     db.select().from(milestones).where(eq(milestones.evidenceStatus, "submitted")).limit(200),
+    // Admin desk sees every dispute regardless of status — unlike GET
+    // /api/disputes, which only ever returns the caller's own.
+    db.select().from(disputes).orderBy(desc(disputes.id)).limit(200),
+    // Reviewers see the full thread, including internal-audience notes that
+    // the dispute opener's own view (app/disputes/page.tsx) never gets.
+    db.select().from(disputeMessages).orderBy(desc(disputeMessages.id)).limit(500),
   ]);
-  return Response.json({ deals: dealRows, requests: requestRows, checks, documents, matches, organizations: organizationRows, introductions: introductionRows, milestones: milestoneRows });
+  return Response.json({ deals: dealRows, requests: requestRows, checks, documents, matches, organizations: organizationRows, introductions: introductionRows, milestones: milestoneRows, disputes: disputeRows, disputeMessages: disputeMessageRows });
 }
 
 export async function PATCH(request: Request) {
@@ -43,7 +51,16 @@ export async function PATCH(request: Request) {
   if (auth instanceof Response) return auth;
   const admin = auth;
 
-  let body: { entity?: string; id?: number | string; status?: string; reason?: string };
+  let body: {
+    entity?: string;
+    id?: number | string;
+    status?: string;
+    reason?: string;
+    // dispute entity only — see the `dispute` branch below.
+    resolutionSummary?: string;
+    assignedToEmail?: string;
+    priority?: string;
+  };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -147,6 +164,58 @@ export async function PATCH(request: Request) {
     if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
     await db.update(milestones).set({ evidenceStatus: status }).where(eq(milestones.id, numericId));
     await db.insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "milestone", entityId: numericId, fromStatus: row.evidenceStatus, toStatus: status, reason });
+  } else if (body.entity === "dispute") {
+    const [row] = await db.select().from(disputes).where(eq(disputes.id, numericId)).limit(1);
+    if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
+
+    // Resolving without a summary would be a status flip nobody can act on
+    // later — required specifically (and only) for this transition.
+    let resolutionSummary = "";
+    if (status === "resolved") {
+      resolutionSummary = String(body.resolutionSummary || "").trim();
+      if (!resolutionSummary) return Response.json({ error: "A resolution summary is required to resolve a dispute." }, { status: 400 });
+    }
+
+    // Assignment and priority are plain optional field updates alongside the
+    // required status transition — e.g. "assign to self" sends the current
+    // status back unchanged plus assignedToEmail, still gated on a reason
+    // like every other decision here.
+    const assignedToEmail = typeof body.assignedToEmail === "string" ? body.assignedToEmail.trim() : undefined;
+    const priorityRaw = typeof body.priority === "string" ? body.priority.trim() : undefined;
+    if (priorityRaw !== undefined && !DISPUTE_PRIORITIES.includes(priorityRaw as (typeof DISPUTE_PRIORITIES)[number])) {
+      return Response.json({ error: "Invalid priority." }, { status: 400 });
+    }
+
+    const now = new Date().toISOString();
+    await db
+      .update(disputes)
+      .set({
+        status,
+        updatedAt: now,
+        ...(status === "resolved" ? { resolvedAt: now, resolutionSummary } : {}),
+        ...(assignedToEmail !== undefined ? { assignedToEmail } : {}),
+        ...(priorityRaw !== undefined ? { priority: priorityRaw } : {}),
+      })
+      .where(eq(disputes.id, numericId));
+
+    await db.insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "dispute", entityId: numericId, fromStatus: row.status, toStatus: status, reason });
+
+    // disputeEvents is the status-change log the parties/reviewers see on
+    // the dispute thread (GET /api/disputes/[id]) — adminAuditEvents above
+    // is the platform-authority record, kept in addition to this, not
+    // instead of it (see db/schema.ts's comment on adminAuditEvents).
+    const assignmentChanged = assignedToEmail !== undefined && assignedToEmail !== row.assignedToEmail;
+    let summary = reason;
+    if (assignmentChanged) summary = `Assigned to ${assignedToEmail || "(unassigned)"}. ${reason}`;
+    else if (priorityRaw !== undefined && priorityRaw !== row.priority) summary = `Priority set to ${priorityRaw}. ${reason}`;
+    await db.insert(disputeEvents).values({
+      disputeId: numericId,
+      actorEmail: admin.email,
+      eventType: status === "resolved" ? "resolved" : assignmentChanged ? "assigned" : "status_change",
+      fromStatus: row.status,
+      toStatus: status,
+      summary,
+    });
   } else {
     return Response.json({ error: "Invalid record." }, { status: 400 });
   }
