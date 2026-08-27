@@ -490,6 +490,35 @@ export const notifications = sqliteTable("notifications", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+// Priority 2 (docs/production-readiness.md): "Audit logging for sensitive
+// actions." adminAuditEvents covers admin-desk decisions,
+// documentAuditEvents/dealEvents/disputeEvents cover deal activity — but
+// nothing logged *authentication* events (who signed in, from where, when,
+// or failed to). This closes that gap. Deliberately minimal fields: email
+// + ip + user agent + a short details string, NEVER a password, token, or
+// session id — see lib/auth/security-events.ts's header for the full
+// rationale (this table is designed to be safe to hand to a human
+// investigating an incident without itself becoming a new secret to leak).
+export const SECURITY_EVENT_TYPES = [
+  "login_success",
+  "login_failed",
+  "logout",
+  "register",
+  "password_reset_requested",
+  "password_reset_completed",
+] as const;
+export type SecurityEventType = (typeof SECURITY_EVENT_TYPES)[number];
+
+export const securityEvents = sqliteTable("security_events", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  eventType: text("event_type").notNull(),
+  email: text("email").notNull().default(""),
+  ip: text("ip").notNull().default(""),
+  userAgent: text("user_agent").notNull().default(""),
+  details: text("details").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 // docs/AUDIT.md §5 item 8: "No idempotency keys on deal creation, dispute
 // creation, or match interest — a retried POST creates a duplicate
 // deal/dispute record." (Match interest was actually already safe — see

@@ -7,6 +7,7 @@ import { createSession, sessionCookieHeader } from "../../../../lib/auth/session
 import { generateRawToken, hashToken, minutesFromNow } from "../../../../lib/auth/tokens";
 import { getEmailProvider } from "../../../../lib/email";
 import { turnstileEnforced, verifyTurnstile } from "../../../../lib/turnstile";
+import { logSecurityEvent } from "../../../../lib/auth/security-events";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -72,10 +73,9 @@ export async function POST(request: Request) {
     text: `Confirm your email to finish setting up your account:\n\n${origin}/verify-email?token=${rawToken}\n\nThis link expires in 24 hours. If you did not create this account, ignore this message.`,
   });
 
-  const { cookieValue } = await createSession(user.id, {
-    ip,
-    userAgent: request.headers.get("user-agent") ?? "",
-  });
+  const userAgent = request.headers.get("user-agent") ?? "";
+  const { cookieValue } = await createSession(user.id, { ip, userAgent });
+  await logSecurityEvent("register", { email, ip, userAgent });
   const secure = new URL(request.url).protocol === "https:";
 
   return Response.json(

@@ -5,6 +5,7 @@ import { hashPassword, passwordPolicyError } from "../../../../lib/auth/password
 import { clientIp, consumeRateLimit } from "../../../../lib/auth/rate-limit";
 import { revokeAllSessionsForUser } from "../../../../lib/auth/session";
 import { hashToken, isExpired } from "../../../../lib/auth/tokens";
+import { logSecurityEvent } from "../../../../lib/auth/security-events";
 
 export async function POST(request: Request) {
   const ip = clientIp(request);
@@ -36,11 +37,16 @@ export async function POST(request: Request) {
   }
 
   const passwordHash = await hashPassword(password);
-  await db.update(users).set({ passwordHash, updatedAt: new Date().toISOString() }).where(eq(users.id, record.userId));
+  const [updatedUser] = await db
+    .update(users)
+    .set({ passwordHash, updatedAt: new Date().toISOString() })
+    .where(eq(users.id, record.userId))
+    .returning({ email: users.email });
   await db.update(passwordResetTokens).set({ consumedAt: new Date().toISOString() }).where(eq(passwordResetTokens.id, record.id));
   // Force re-authentication on every device — a leaked-then-reset password
   // means old sessions should not still be trusted.
   await revokeAllSessionsForUser(record.userId);
+  await logSecurityEvent("password_reset_completed", { email: updatedUser?.email, ip, userAgent: request.headers.get("user-agent") ?? "" });
 
   return Response.json({ ok: true });
 }

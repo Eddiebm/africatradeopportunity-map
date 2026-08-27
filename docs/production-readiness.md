@@ -146,11 +146,120 @@ mocked):**
 
 ---
 
-## Priorities 2–13
+## Priority 2 — Production security
 
-Not started. Per the mandated execution order, Priority 1's full loop
-(including this document) is complete first; the remaining priorities are
-worked next, one focused commit (or a few) per priority, each getting its
-own dated section here — never marked verified without the same real
-browser + attack-test + accessibility rigor applied above, and never
-batched into a single unverified sweep.
+**Status: in progress.** Inspected the full checklist against the actual
+codebase before writing anything new — most of it was already correctly
+built in earlier phases; this pass verified that honestly (re-reading the
+code, not assuming past commit messages) and closed the one real gap
+found (audit logging).
+
+**Already correct, verified by re-reading the actual code this pass (not
+newly built here):**
+- **CSRF**: `proxy.ts` rejects any mutating `/api/*` request whose
+  `Origin` header doesn't match the request's own origin; the session
+  cookie is `SameSite=Strict` (defense in depth even for browsers that
+  don't enforce the origin check server-side would rely on).
+- **Cookies**: `lib/auth/session.ts`'s `sessionCookieHeader` sets
+  `HttpOnly`, `SameSite=Strict`, and `Secure` (over HTTPS). Verified in
+  code, not just by comment.
+- **Session expiration, refresh, and revocation**: `resolveSession` checks
+  `expiresAt`, `revokedAt`, and `user.status`, and does a sliding-window
+  refresh; `revokeSessionByCookie` / `revokeAllSessionsForUser` exist and
+  are actually called (logout; password reset).
+- **Session rotation on a sensitive event**: `reset-password/route.ts`
+  already called `revokeAllSessionsForUser` on a successful reset before
+  this pass touched it — a leaked-then-reset password can't leave old
+  sessions trusted.
+- **Login/registration/password-reset rate limiting**: all four
+  `app/api/auth/*` routes call `consumeRateLimit`, including a
+  per-account bucket on login (not just per-IP), verified live this
+  session (see Priority 1's report — hit register's real 8/hour/IP limit
+  with test traffic, confirming it actually fires).
+- **CSP**: nonce-based, verified via Playwright across `/`, `/login`,
+  `/marketplace`, `/opportunities` earlier this session (0 CSP
+  violations, all inline scripts carry the nonce) — not re-verified
+  again in this pass since nothing here touched it.
+- **Safe redirect handling**: `app/login/page.tsx`'s `returnTo()`
+  rejects anything not starting with `/` or starting with `//` before
+  using it as a redirect target; every other `location.href =`/`redirect()`
+  call site in the app either uses a hardcoded path or a numeric id from
+  a server response, never an arbitrary client-supplied string — grepped
+  every occurrence this pass, none are exploitable.
+- **File-name sanitization, MIME/magic-byte validation, upload size
+  limits**: `app/api/deals/[id]/documents/route.ts` already does all
+  three (`file.name.replace(/[^a-zA-Z0-9._ -]/g,"_")`, per-type magic-byte
+  checks, 10MB cap).
+- **R2 authorization**: closed in Priority 1 (`deal-access.ts`).
+- **Hardcoded administrator identity**: removed in Phase 1 (DB-backed
+  `platformRole`, no hardcoded email anywhere — grepped this pass to
+  confirm, found none).
+- **Output encoding**: grepped the whole app for `dangerouslySetInnerHTML`
+  — zero occurrences. Everything renders through JSX's default escaping.
+- **Secrets outside source control**: `.gitignore` excludes `.dev.vars`
+  and `.env*`; only `.dev.vars.example` (no real values) is tracked.
+- **Fabricated verification/trade claims**: this is the whole ethic
+  behind the existing Opportunity Finder/import-intelligence work
+  (Phase 4) — not re-audited line-by-line this pass, flagged here as
+  "already addressed elsewhere" rather than silently assumed.
+
+**Gap found and closed this pass: audit logging for sensitive actions.**
+`adminAuditEvents` covers admin-desk decisions and
+`documentAuditEvents`/`dealEvents`/`disputeEvents` cover deal activity,
+but nothing logged *authentication* events at all — no record of who
+signed in, from where, or of failed attempts.
+- `db/schema.ts`: new `securityEvents` table (migration `0010`,
+  additive) — `eventType`, `email`, `ip`, `userAgent`, `details`,
+  `createdAt`. Deliberately minimal fields; see
+  `lib/auth/security-events.ts`'s header for the explicit "never log a
+  password/token/session-id" contract.
+- `lib/auth/security-events.ts` (new): `logSecurityEvent()` — never
+  throws (a logging failure must not break a real login), swallows and
+  `console.error`s instead.
+- Wired into `app/api/auth/login/route.ts` (success + two distinct
+  failure reasons, logged with the SAME generic detail string so the log
+  itself can't be used to enumerate accounts any more than the response
+  already can't), `logout/route.ts` (resolves the session for its email
+  *before* revoking it — otherwise there'd be nothing to attribute the
+  logout to), `register/route.ts`, `request-password-reset/route.ts`
+  (logged identically whether or not the account exists — matches that
+  route's existing anti-enumeration guarantee), `reset-password/route.ts`.
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (38 pre-existing,
+unchanged) · **61/61 tests** (3 new: a real row gets written with
+correct fields, failure details don't leak which check failed, and —
+proven with a mocked DB failure — logging a failure never throws) ·
+`build` clean. Migration `0010` applied cleanly.
+
+**Browser flows verified (Playwright, real dev server, real D1):**
+register → confirmed a `register` row exists for that email → logout →
+confirmed a `logout` row → failed login (wrong password) → confirmed a
+`login_failed` row with the generic detail string → successful login →
+confirmed a `login_success` row → password-reset request for an email
+with **no account** → confirmed a `password_reset_requested` row exists
+for it too (anti-enumeration: the log doesn't distinguish real accounts
+from fake ones any more than the HTTP response does) → queried every row
+written during the run and confirmed neither the real nor the wrong
+password value appears anywhere in the table.
+
+**Remaining Priority 2 scope, not yet done:** input-validation audit
+across all route handlers (spot-checked several, not systematically
+reviewed every one); a dedicated review of what `adminAuditEvents` does
+and doesn't cover for admin-desk actions specifically (assumed adequate
+from Phase 1 based on its existing design, not re-verified this pass);
+no runbook yet describing how an operator would actually query
+`security_events`/`admin_audit_events` during a real incident (Priority
+3's "operational runbook" is the right place for that, not duplicated
+here).
+
+**Commit:** `pending` — will be filled in after this section is
+committed.
+
+---
+
+## Priorities 3–13
+
+Not started. Worked next, one focused commit (or a few) per priority,
+each getting its own dated section here — never marked verified without
+the same real browser + attack-test + accessibility rigor applied above,
+and never batched into a single unverified sweep.

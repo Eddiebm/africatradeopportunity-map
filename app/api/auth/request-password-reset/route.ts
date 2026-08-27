@@ -4,6 +4,7 @@ import { passwordResetTokens, users } from "../../../../db/schema";
 import { clientIp, consumeRateLimit } from "../../../../lib/auth/rate-limit";
 import { generateRawToken, hashToken, minutesFromNow } from "../../../../lib/auth/tokens";
 import { getEmailProvider } from "../../../../lib/email";
+import { logSecurityEvent } from "../../../../lib/auth/security-events";
 
 // Always returns the same generic message, whether or not the address is
 // registered — never let this endpoint confirm which emails have accounts.
@@ -40,6 +41,10 @@ export async function POST(request: Request) {
       text: `Reset your password:\n\n${origin}/reset-password?token=${rawToken}\n\nThis link expires in 30 minutes and can only be used once. If you did not request this, you can ignore this message.`,
     });
   }
+  // Logged for BOTH cases (account exists or not) with the same shape —
+  // the log itself never distinguishes them either, matching the generic
+  // response's own anti-enumeration guarantee.
+  await logSecurityEvent("password_reset_requested", { email, ip, userAgent: request.headers.get("user-agent") ?? "" });
 
   return Response.json(GENERIC_RESPONSE);
 }
