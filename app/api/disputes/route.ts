@@ -1,5 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
-import { requireUserOrResponse } from "../../../lib/auth/current-user";
+import { requireUserOrResponse, type SessionUser } from "../../../lib/auth/current-user";
+import { withIdempotency } from "../../../lib/idempotency";
 import { getDb } from "../../../db";
 import { dealEvents, deals, disputeEvents, disputes, notifications } from "../../../db/schema";
 
@@ -15,6 +16,12 @@ export async function POST(req: Request) {
   const auth = await requireUserOrResponse(req);
   if (auth instanceof Response) return auth;
   const user = auth;
+  // docs/AUDIT.md §5 item 8: without this, a retried POST opened a second
+  // dispute — see lib/idempotency.ts.
+  return withIdempotency(req, user, "POST /api/disputes", () => createDispute(req, user));
+}
+
+async function createDispute(req: Request, user: SessionUser) {
   try {
     const body = await req.json() as Record<string, string | number>;
     const dealId = Number(body.dealId), category = String(body.category || "").trim(), description = String(body.description || "").trim();

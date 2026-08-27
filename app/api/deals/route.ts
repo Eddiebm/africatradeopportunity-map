@@ -1,5 +1,6 @@
 import { desc, eq } from "drizzle-orm";
-import { requireUserOrResponse } from "../../../lib/auth/current-user";
+import { requireUserOrResponse, type SessionUser } from "../../../lib/auth/current-user";
+import { withIdempotency } from "../../../lib/idempotency";
 import { getDb } from "../../../db";
 import { dealCosts, dealDocuments, dealEvents, deals, milestones, verificationChecks } from "../../../db/schema";
 
@@ -24,6 +25,13 @@ export async function POST(req: Request) {
   const auth = await requireUserOrResponse(req);
   if (auth instanceof Response) return auth;
   const user = auth;
+  // docs/AUDIT.md §5 item 8: without this, a retried POST (double-click,
+  // a client retrying a dropped response) created a second deal room —
+  // see lib/idempotency.ts for exactly what this does and does not cover.
+  return await withIdempotency(req, user, "POST /api/deals", () => createDeal(req, user));
+}
+
+async function createDeal(req: Request, user: SessionUser) {
   try {
     const body = await req.json() as Record<string, string | number>;
     const required = ["requestType", "product", "origin", "destination"];

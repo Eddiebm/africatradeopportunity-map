@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 // ---------------------------------------------------------------------------
 // Identity, sessions and platform-level authorization.
@@ -476,3 +476,43 @@ export const notifications = sqliteTable("notifications", {
   sentAt: text("sent_at"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+// docs/AUDIT.md §5 item 8: "No idempotency keys on deal creation, dispute
+// creation, or match interest — a retried POST creates a duplicate
+// deal/dispute record." (Match interest was actually already safe — see
+// lib/idempotency.ts's header comment — this table covers the routes that
+// weren't: deal and dispute creation.) A client sends an Idempotency-Key
+// header once per logical user action; a retry of the exact same request
+// (double-click, a network retry, a client resubmitting after a timeout it
+// never actually saw the response to) replays the stored response instead
+// of re-executing the mutation. Scoped per-user + per-endpoint, not
+// globally, so two different users — or the same user acting on two
+// different endpoints — can never collide on the same key.
+//
+// `status` exists (rather than just writing responseStatus/responseBody
+// once, after the handler runs) because a select-then-insert check alone
+// has a real race: two concurrent requests with the same key can both see
+// "no row yet" and both run the mutation before either finishes writing.
+// The unique index below is what actually closes that race — a request
+// claims a key by INSERTing a 'pending' row (the unique index makes only
+// one concurrent insert win), runs its mutation, then UPDATEs the row to
+// 'completed'. A request that loses the insert race polls this row until
+// it flips to 'completed' and replays it, instead of running the mutation
+// itself. See lib/idempotency.ts for the full protocol.
+export const idempotencyKeys = sqliteTable(
+  "idempotency_keys",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    userId: integer("user_id").notNull().references(() => users.id),
+    endpoint: text("endpoint").notNull(),
+    key: text("key").notNull(),
+    status: text("status").notNull().default("pending"), // pending | completed
+    responseStatus: integer("response_status"),
+    responseBody: text("response_body"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    completedAt: text("completed_at"),
+  },
+  (table) => ({
+    userEndpointKey: uniqueIndex("idempotency_keys_user_endpoint_key").on(table.userId, table.endpoint, table.key),
+  }),
+);
