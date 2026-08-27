@@ -609,7 +609,7 @@ pages with real data. It does **not** add screen-reader testing or
 localization/string-extraction — those remain exactly as scoped in the
 original pass above, unchanged.
 
-**Commit:** pending
+**Commit:** `bebb9ff`
 
 ---
 
