@@ -29,3 +29,13 @@ export function nextStage(current: string): DealStage | null {
   if (index < 0 || index === DEAL_STAGE_ORDER.length - 1) return null;
   return DEAL_STAGE_ORDER[index + 1];
 }
+
+// Priority 8 introduced this exact logic locally in lib/exceptions.ts;
+// Priority 13's lib/business-metrics.ts needs the identical "how far
+// along is this deal" comparison — promoted here as the one shared
+// implementation rather than a third private copy. -1 for an unknown/
+// legacy stage value (e.g. the old "intake"), matching nextStage()'s own
+// treatment of that case.
+export function stageIndex(stage: string): number {
+  return DEAL_STAGE_ORDER.indexOf(stage as DealStage);
+}

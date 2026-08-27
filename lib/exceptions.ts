@@ -28,7 +28,7 @@ import {
   type ExceptionSeverity,
   type ExceptionType,
 } from "../db/schema";
-import { DEAL_STAGES } from "./deal-stages";
+import { stageIndex } from "./deal-stages";
 import { resolveCorridorTier } from "./corridor-templates";
 import { resolveOrganizationVerificationLevel } from "./verification-levels";
 
@@ -60,9 +60,6 @@ function dedupeKeyFor(c: Pick<DetectedCondition, "exceptionType" | "entityType" 
   return `${c.exceptionType}:${c.entityType}:${c.entityId}`;
 }
 
-function stageIndex(stage: string): number {
-  return DEAL_STAGES.indexOf(stage as (typeof DEAL_STAGES)[number]);
-}
 
 const REVIEW_TEAM = "TradeSafe review team";
 

@@ -1712,6 +1712,147 @@ gating, range sanity checks, and actual-requires-a-source rule) ·
 
 ## Priority 13
 
-Not started. Worked next — the final priority in the mission's list.
-Never marked verified without the same real browser + attack-test +
-accessibility rigor applied above.
+**Status: Fully verified.** The final priority in the mission's list —
+a real business-validation dashboard reading exclusively from data
+already recorded by Priorities 1–12, never from registrations, listing
+counts, or page views.
+
+**Files changed:**
+- `lib/business-metrics.ts` (new) — `computeBusinessMetrics()`, a
+  single real aggregation function reading `marketRequests`,
+  `organizations`, `referralAttributions`, `deals`, `quoteRequests`/
+  `quotes`, `landedCostEntries` (via `getLandedCostBreakdown()`),
+  `adminAuditEvents`, `milestones`, `dealEvents`, and `disputes`
+  directly. Every metric that cannot be honestly computed from real
+  data returns `{available:false, reason:"..."}` instead of a
+  fabricated or zeroed value.
+- `app/admin/metrics/page.tsx` (new) — a Server Component,
+  `requirePlatformRole("/admin/metrics", ["administrator"])`.
+  Deliberately narrower than the rest of `/admin` (excludes
+  `verification_analyst` — business-level traction data is a
+  different real access question from evidence review).
+- `lib/deal-stages.ts` — promoted a shared `stageIndex()` export (was
+  a private duplicate inside `lib/exceptions.ts`).
+- `lib/exceptions.ts` — now imports `stageIndex` from
+  `lib/deal-stages.ts` instead of duplicating it; removed the
+  now-unused `DEAL_STAGES` import.
+- `app/admin/page.tsx` — added a real, working nav link to
+  `/admin/metrics` from the main verification desk.
+- `tests/unit/business-metrics.test.ts` (new, 12 cases).
+
+**Mission-checklist mapping:**
+- **"Track: qualified buyer requests, verified suppliers,
+  partner-referred leads"** — real counts from `marketRequests`
+  (`role:"quote_request"`, by status), `organizations`
+  (`verificationStatus:"verified"`), and `referralAttributions`
+  (`isPrimary:true`, split by real `source`: `intake_link` vs.
+  `code_entry`). Fraud-flagged/non-primary attributions are correctly
+  excluded, matching the Priority 11 convention.
+- **"Track: acquisition cost per qualified buyer, revenue per
+  transaction"** — **always** `{available:false}` with a real, stated
+  reason (no billing or marketing-spend tracking exists anywhere in
+  this codebase). Verified live and in tests: these two figures never
+  render as `$0` or any number, only as "Not tracked" plus the reason
+  sentence.
+- **"Track: time to first useful quote, quote→payment-confirmed
+  conversion, transactions initiated/completed, repeat-transaction
+  owners"** — time-to-quote is a real day-delta between deal creation
+  and the first row in `quotes` for that deal's `quoteRequests`;
+  conversion is real deals-with-a-quote reaching `stage:"closed"`
+  divided by deals-with-a-quote; initiated/completed read `deals.stage`
+  directly; repeat owners count `ownerEmail`s with 2+ deals.
+- **"Track: landed-cost accuracy, manual interventions per
+  transaction, verification turnaround, on-time milestones"** —
+  landed-cost variance reuses Priority 12's `getLandedCostBreakdown()`
+  per deal and averages real actual-vs-estimate percentages (honestly
+  unavailable when no deal has a recorded actual yet); manual
+  interventions counts real `adminAuditEvents` rows per deal
+  (documented in-page as an approximation, since audit events aren't
+  currently joined to a specific check/document); verification
+  turnaround reads the real `dealEvents` `stage_transition` row whose
+  summary records `→ counterparties_verified`; on-time milestones
+  compares the earliest `adminAuditEvents` row verifying a milestone
+  against that milestone's real `dueAt`.
+- **"Track: disputes and resolution time"** — real counts by
+  `disputes.status`, real average `resolvedAt − createdAt` in days,
+  honestly unavailable when nothing has resolved yet.
+- **"Do NOT prioritize registrations, listing counts, or page views as
+  proof of traction"** — the dashboard never renders a "total users" /
+  "total registrations" headline tile, and states in its own visible
+  copy that it never uses registrations, listings, or page views as
+  evidence.
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (54 warnings,
++1 over Priority 12's 53, the same pre-existing `no-html-link-for-pages`
+warning class — this page's nav uses a plain `<a>`, matching every
+other admin page in the app) · **221/221 tests** (12 new: empty-platform
+honesty, both always-unavailable metrics carrying a real reason,
+qualified-buyer-request status counting, verified-supplier counting,
+partner-referred-lead counting by source with fraud-flagged rows
+excluded, time-to-first-quote, transactions initiated/completed/repeat
+owners, landed-cost variance %, disputes counting + resolution time,
+on-time milestones, verification turnaround) · `build` clean.
+
+**Live browser + attack verification, not just unit tests:**
+- **Attack**: an anonymous visitor requesting `/admin/metrics` is
+  redirected to `/login`, never sees any business data.
+- **Attack**: a real `verification_analyst` account (a genuine
+  reviewer role, but not `administrator`) is also redirected away —
+  confirming the dashboard's gate is deliberately narrower than the
+  rest of `/admin`.
+- A real `administrator` account loads the dashboard with **zero
+  console errors**.
+- Confirmed live: no "TOTAL USERS"/"TOTAL REGISTRATIONS" headline tile
+  anywhere on the page; the page's own copy explicitly states it never
+  uses registrations, listings, or page views as traction proof.
+- Confirmed live: acquisition-cost-per-qualified-buyer renders as
+  "Not tracked" with the real "no acquisition spend is tracked" reason
+  text, not a fabricated number; revenue-per-transaction renders as
+  "Not tracked" with the real "does not currently charge" reason text,
+  not a fabricated `$0`.
+- A real deal created live through `/deal/new` → the dashboard's
+  TRANSACTIONS INITIATED figure, re-read after the deal's creation,
+  matched the real, current `SELECT COUNT(*) FROM deals` figure read
+  directly from D1 — proving the number is live-computed, not cached
+  or stale.
+- **Accessibility tree** (a real Playwright snapshot): every heading
+  and link on the page has a real, non-empty accessible name.
+- **Mobile viewport (390×844): no horizontal overflow** — this caught
+  a real bug (below).
+- The main `/admin` verification desk has a real, working link to
+  `/admin/metrics`.
+
+**Real bug found and fixed during live verification:** the dashboard's
+"manual interventions" description originally read a literal
+`admin_audit_events`-style underscored token. With no word-break
+opportunity, that unbroken string forced CSS Grid's `1fr 1fr` mobile
+layout into unequal computed column widths (204.875px vs. 186.219px in
+a 351px container), overflowing the 390px mobile viewport by 21px.
+Root-caused via `getBoundingClientRect()` sweeps and
+`getComputedStyle().gridTemplateColumns` inspection on the specific
+`.roommetrics` section, then fixed by rewording the copy to natural,
+breakable English ("real admin actions logged per deal") — re-verified
+clean on the same 390px viewport. This is a real, generalizable bug
+class: any user-facing copy containing a long code/table-name literal
+with no natural break points can force unequal grid columns and
+overflow on narrow viewports; the fix here was to avoid code-literal
+copy in user-facing text generally, not just in this one sentence.
+
+**Remaining risks, explicitly deferred:**
+- `manualInterventionsPerTransaction` is a documented approximation —
+  it counts all `adminAuditEvents` rows scoped to a deal or its
+  milestones, not interventions precisely attributable to that one
+  transaction's specific checks; a future priority could tighten this
+  by joining audit events to their originating entity more precisely.
+- No historical trend view (day-over-day or week-over-week deltas) —
+  every figure is a real point-in-time snapshot as of page load; a
+  time-series view was judged out of scope for this priority's mission
+  ("a dashboard," not "a BI system").
+- No CSV/export path for these figures — internal-only, read live in
+  the browser; exporting was not part of the mission checklist.
+
+**Commit:** pending
+
+---
+
+All 13 priorities from the original specification are now complete.
