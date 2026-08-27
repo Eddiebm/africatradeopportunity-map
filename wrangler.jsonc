@@ -6,15 +6,20 @@
   // by `@cloudflare/vite-plugin` (via vinext) for local dev/build, and by
   // `wrangler` / `vinext deploy` for preview and production deploys.
   //
-  // REQUIRED before the first real deploy (see docs/DEPLOYMENT.md):
-  //   1. `wrangler login` (or set CLOUDFLARE_API_TOKEN in CI)
-  //   2. `wrangler d1 create tradesafe-africa-db`      -> paste database_id below
-  //   3. `wrangler r2 bucket create tradesafe-africa-documents`
-  //   4. Set CLOUDFLARE_ACCOUNT_ID (env var) or add "account_id" here
-  //   5. `wrangler secret put SESSION_SECRET` (and any email-provider keys)
-  //   6. `npm run db:migrate:remote` to apply drizzle/*.sql to the real D1 DB
-  //
-  // The placeholder database_id below only works for local Miniflare dev.
+  // Deploy status (see docs/DEPLOYMENT.md):
+  //   1. done  — real D1 database "tradesafe-africa-db" created, all 19
+  //      drizzle/*.sql migrations applied (39 tables, verified to match
+  //      local dev schema exactly), database_id below is real.
+  //   2. done  — real R2 bucket "tradesafe-africa-documents" created.
+  //   3. NOT done — `wrangler secret put SESSION_SECRET` (and any real
+  //      email/WhatsApp-provider keys) still needs to be run against the
+  //      real account before the Worker can serve traffic safely.
+  //   4. NOT done — the actual Worker script has not been pushed
+  //      (`wrangler deploy` / `vinext deploy`) — this requires CLI
+  //      credentials (CLOUDFLARE_API_TOKEN + account ID) that were not
+  //      available when the D1/R2 resources above were provisioned via
+  //      the Cloudflare Developer Platform MCP connector, which has no
+  //      worker-code deploy tool.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tradesafe-africa",
   "main": "./worker/index.ts",
@@ -29,8 +34,7 @@
     {
       "binding": "DB",
       "database_name": "tradesafe-africa-db",
-      // Placeholder — replace with the real ID from `wrangler d1 create`.
-      "database_id": "00000000-0000-4000-8000-000000000000",
+      "database_id": "d0ab7ce4-70c4-4b17-81df-30ff69e00b20",
       "migrations_dir": "drizzle"
     }
   ],
