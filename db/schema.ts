@@ -931,3 +931,105 @@ export const organizationVerifications = sqliteTable("organization_verifications
   humanReviewRequired: integer("human_review_required", { mode: "boolean" }).notNull().default(true),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+// ---------------------------------------------------------------------------
+// Priority 11 (docs/production-readiness.md): "Brokers, associations,
+// referrals — broker/association profiles, partner-specific intake links,
+// referral codes/attribution, protected buyer-broker relationships,
+// commission records/status, disclosure of who pays commissions,
+// fraud/self-referral controls. Don't pay commissions until legal/
+// accounting requirements are defined — may track pending/approved
+// obligations without transferring money."
+//
+// "Broker/association profiles" already exist — `organizations` +
+// ORGANIZATION_ROLES already includes "broker" (see the top of this
+// file); this section is deliberately just the referral/attribution/
+// commission-TRACKING layer on top, not a parallel profile system.
+//
+// Money-movement is a hard boundary, enforced by absence: COMMISSION_
+// STATUSES below has no "paid" value, and no function anywhere in this
+// codebase transitions a commission record to one. Approving a record
+// here is a platform decision that an obligation is legitimate and
+// tracked — never a payment instruction, never money moving.
+// ---------------------------------------------------------------------------
+
+// Any organization can generate a code for itself (a broker referring a
+// client, but equally a trader referring a counterparty post-deal — see
+// Priority 11's "post-deal: refer buyer/supplier" requirement) — nothing
+// here gates code creation by role; eligibility for an actual commission
+// is a separate, human, admin decision (see commissionRecords below), not
+// implied by merely holding a code.
+export const referralPartners = sqliteTable("referral_partners", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  organizationId: integer("organization_id").notNull().references(() => organizations.id),
+  code: text("code").notNull().unique(),
+  createdByEmail: text("created_by_email").notNull(),
+  status: text("status").notNull().default("active"), // active | suspended
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const REFERRAL_ATTRIBUTION_SOURCES = ["intake_link", "code_entry"] as const;
+export type ReferralAttributionSource = (typeof REFERRAL_ATTRIBUTION_SOURCES)[number];
+
+// "Protected buyer-broker relationships": FIRST attribution for a given
+// referee wins and is permanent (isPrimary stays true forever, never
+// reassigned) — a second broker cannot later claim the same referee by
+// generating their own code and having that person click it. Every
+// attempt is still recorded (isPrimary:false for the losers), preserving
+// full history/audit rather than silently discarding a duplicate.
+export const referralAttributions = sqliteTable("referral_attributions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  // Denormalized alongside referralPartnerId deliberately — this table is
+  // read far more often (every quote/registration checks it) than
+  // referralPartners changes, and this avoids a join on the hot path;
+  // same tradeoff this schema already makes elsewhere (e.g. dealParties
+  // keeping both organizationId and a plain-text name).
+  referralCode: text("referral_code").notNull(),
+  referralPartnerId: integer("referral_partner_id").notNull().references(() => referralPartners.id),
+  // TS property intentionally NOT "refereeEmail" — the underlying SQL
+  // column is named referee_email (this table's own migration), but the
+  // value stored here is whatever identifier the referred party actually
+  // gave (an email from /quote, or a phone number from the WhatsApp
+  // webhook) — refereeContact is the honest name for that on the app side.
+  refereeContact: text("referee_email").notNull(),
+  marketRequestId: integer("market_request_id").references(() => marketRequests.id),
+  dealId: integer("deal_id").references(() => deals.id),
+  source: text("source").notNull(),
+  isPrimary: integer("is_primary", { mode: "boolean" }).notNull().default(true),
+  // "" = no concern found. A real, specific reason otherwise —
+  // "self_referral" (the referee's own org created this code) or
+  // "duplicate_attribution" (this referee already has a primary
+  // attribution from a different code) — never a silent guess.
+  fraudFlag: text("fraud_flag").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const COMMISSION_BASES = ["percentage", "flat"] as const;
+export type CommissionBasis = (typeof COMMISSION_BASES)[number];
+// Deliberately NO "paid" value — see this section's header. "waived" is
+// the honest terminal state for "this platform decided not to pursue/
+// honor this obligation," distinct from "disputed" (unresolved).
+export const COMMISSION_STATUSES = ["pending", "approved", "disputed", "waived"] as const;
+export type CommissionStatus = (typeof COMMISSION_STATUSES)[number];
+
+export const commissionRecords = sqliteTable("commission_records", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  dealId: integer("deal_id").notNull().references(() => deals.id),
+  referralPartnerId: integer("referral_partner_id").notNull().references(() => referralPartners.id),
+  attributionId: integer("attribution_id").references(() => referralAttributions.id),
+  basis: text("basis").notNull(),
+  rate: real("rate"), // percentage basis, e.g. 2.5
+  flatAmount: real("flat_amount"), // flat basis
+  currency: text("currency").notNull().default("USD"),
+  // "Disclosure of who pays commissions" — a real, required field, not an
+  // afterthought; app/r/[code]/page.tsx and app/api/admin/commissions
+  // both surface this value directly rather than assuming a payer.
+  payerParty: text("payer_party").notNull(),
+  status: text("status").notNull().default("pending"),
+  notes: text("notes").notNull().default(""),
+  createdByEmail: text("created_by_email").notNull(),
+  approvedByEmail: text("approved_by_email").notNull().default(""),
+  approvedAt: text("approved_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

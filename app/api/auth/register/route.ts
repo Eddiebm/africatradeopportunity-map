@@ -8,6 +8,7 @@ import { generateRawToken, hashToken, minutesFromNow } from "../../../../lib/aut
 import { getEmailProvider } from "../../../../lib/email";
 import { turnstileEnforced, verifyTurnstile } from "../../../../lib/turnstile";
 import { logSecurityEvent } from "../../../../lib/auth/security-events";
+import { recordReferralAttribution } from "../../../../lib/referrals";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -77,6 +78,15 @@ export async function POST(request: Request) {
   const { cookieValue } = await createSession(user.id, { ip, userAgent });
   await logSecurityEvent("register", { email, ip, userAgent });
   const secure = new URL(request.url).protocol === "https:";
+
+  // Priority 11 (docs/production-readiness.md): a referral code carried
+  // from app/r/[code]/page.tsx's "Register" link. Never blocks or fails
+  // registration if attribution has any issue — this is a secondary,
+  // best-effort credit, not a precondition for creating an account.
+  const referralCode = typeof body.ref === "string" ? body.ref.trim() : "";
+  if (referralCode) {
+    await recordReferralAttribution({ code: referralCode, refereeContact: email, source: "code_entry" }).catch(() => {});
+  }
 
   return Response.json(
     {

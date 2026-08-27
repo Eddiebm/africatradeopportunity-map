@@ -1,9 +1,10 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { requireUser } from "../../../lib/auth/current-user";
 import { resolveDealViewAccess } from "../../../lib/auth/deal-access";
 import { getDb } from "../../../db";
-import { dealCosts, dealDocuments, dealEvents, documentFiles, milestones, organizationMembers, organizations, quoteRequests, quotes, verificationChecks } from "../../../db/schema";
+import { dealCosts, dealDocuments, dealEvents, dealParties, documentFiles, milestones, organizationMembers, organizations, quoteRequests, quotes, verificationChecks } from "../../../db/schema";
 import CheckEvidencePicker from "../../components/CheckEvidencePicker";
+import DealPartiesAndReferrals from "../../components/DealPartiesAndReferrals";
 import DocumentUploadRow from "../../components/DocumentUploadRow";
 import MilestoneEvidenceButton from "../../components/MilestoneEvidenceButton";
 import QuoteActions from "../../components/QuoteActions";
@@ -23,7 +24,7 @@ export default async function DealRoom({ params }: { params: Promise<{ id: strin
   if (!access) return <main className="portal"><section className="portalempty"><h1>Deal not found</h1><a href="/dashboard">Return to your trade desk</a></section></main>;
   const { deal, reason: viewReason } = access;
   const isOwner = viewReason === "owner";
-  const [costRows, checks, documents, files, steps, events, myOrgMemberships, dealQuoteRequests] = await Promise.all([
+  const [costRows, checks, documents, files, steps, events, myOrgMemberships, dealQuoteRequests, parties] = await Promise.all([
     db.select().from(dealCosts).where(eq(dealCosts.dealId, id)).limit(1),
     db.select().from(verificationChecks).where(eq(verificationChecks.dealId, id)),
     db.select().from(dealDocuments).where(eq(dealDocuments.dealId, id)),
@@ -32,6 +33,9 @@ export default async function DealRoom({ params }: { params: Promise<{ id: strin
     db.select().from(dealEvents).where(eq(dealEvents.dealId, id)).orderBy(asc(dealEvents.id)),
     db.select({ organizationId: organizationMembers.organizationId, role: organizationMembers.role }).from(organizationMembers).where(and(eq(organizationMembers.userId, user.id), eq(organizationMembers.status, "active"))),
     db.select().from(quoteRequests).where(eq(quoteRequests.dealId, id)).orderBy(desc(quoteRequests.createdAt)),
+    // Priority 11 (docs/production-readiness.md): "invite a participant" —
+    // this API (Priority 1) had no UI form calling it until now.
+    db.select().from(dealParties).where(and(eq(dealParties.dealId, id), isNull(dealParties.removedAt))),
   ]);
   const dealQuotes = dealQuoteRequests.length
     ? await db.select().from(quotes).where(inArray(quotes.quoteRequestId, dealQuoteRequests.map((q) => q.id))).orderBy(desc(quotes.createdAt))
@@ -87,6 +91,20 @@ export default async function DealRoom({ params }: { params: Promise<{ id: strin
       </article>
     </section>
     <section className="release"><div className="roomtitle"><small>PROPOSED PAYMENT RELEASES</small><b>Licensed partner execution required</b></div>{steps.map((step) => <article key={step.id}><i>{step.sequence}</i><span><b>{step.name}</b><small>{step.releaseCondition}</small></span><strong>{step.percentage}%</strong>{isOwner ? <MilestoneEvidenceButton dealId={id} milestoneId={step.id} evidenceStatus={step.evidenceStatus} /> : <small>{step.evidenceStatus.replaceAll("_", " ")}</small>}</article>)}</section>
+    {/* Priority 11 (docs/production-readiness.md): "post-deal: invite a
+        participant, refer buyer/supplier ... start repeat transaction." */}
+    <section className="roomgrid">
+      <article style={{ gridColumn: "1/3" }}>
+        <DealPartiesAndReferrals dealId={id} parties={parties} myOrganizations={myOrganizations} isOwner={isOwner} />
+        {isOwner && (
+          <p style={{ marginTop: 20 }}>
+            <a href={`/deal/new?product=${encodeURIComponent(deal.product)}&hs=${encodeURIComponent(deal.hsCode || "")}&origin=${encodeURIComponent(deal.origin)}&destination=${encodeURIComponent(deal.destination)}`}>
+              Start a repeat transaction (reuse this spec) →
+            </a>
+          </p>
+        )}
+      </article>
+    </section>
     <section className="timeline"><div className="roomtitle"><small>ACTIVITY</small><b>Audit trail</b></div>{events.map(event => <p key={event.id}><i>{event.createdAt}</i><span>{event.summary}</span></p>)}</section>
   </main>;
 }

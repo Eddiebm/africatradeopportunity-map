@@ -31,6 +31,10 @@ export default function Register() {
         // itself once the widget below renders and the visitor completes
         // the challenge; empty/absent when no site key is configured.
         turnstileToken: form.get("cf-turnstile-response") || undefined,
+        // Priority 11 (docs/production-readiness.md): a referral code
+        // carried from app/r/[code]/page.tsx's "Register" link, if this
+        // visitor arrived via one — undefined (not attributed) otherwise.
+        ref: new URLSearchParams(window.location.search).get("ref") || undefined,
       }),
     });
     const data = (await res.json()) as { error?: string };

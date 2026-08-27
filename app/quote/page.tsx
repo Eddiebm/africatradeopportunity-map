@@ -29,10 +29,14 @@ export default function QuoteRequest() {
     setState("Sending your request…");
     const body = Object.fromEntries(formData.entries());
     try {
+      // Priority 11 (docs/production-readiness.md): a referral code
+      // carried from app/r/[code]/page.tsx's "Continue" link, if this
+      // visitor arrived via one.
+      const ref = new URLSearchParams(window.location.search).get("ref") || undefined;
       const res = await fetch("/api/market-requests", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...body, role: "quote_request" }),
+        body: JSON.stringify({ ...body, role: "quote_request", ref }),
       });
       const data = (await res.json()) as { error?: string };
       if (res.ok) {

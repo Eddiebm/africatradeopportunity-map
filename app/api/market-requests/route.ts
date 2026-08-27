@@ -4,6 +4,7 @@ import { marketRequests, organizationMembers } from "../../../db/schema";
 import { getCurrentUserFromRequest } from "../../../lib/auth/current-user";
 import { clientIp } from "../../../lib/auth/rate-limit";
 import { turnstileEnforced, verifyTurnstile } from "../../../lib/turnstile";
+import { recordReferralAttribution } from "../../../lib/referrals";
 
 export async function GET(){
   try { const rows=await getDb().select({id:marketRequests.id,role:marketRequests.role,origin:marketRequests.origin,destination:marketRequests.destination,product:marketRequests.product,volume:marketRequests.volume,status:marketRequests.status,createdAt:marketRequests.createdAt}).from(marketRequests).orderBy(desc(marketRequests.id)).limit(50); return Response.json({requests:rows}); }
@@ -53,6 +54,13 @@ export async function POST(req:Request){
       preferredContactMethod:b.preferredContactMethod?.trim()||"",
       consentAt:isQuoteRequest?new Date().toISOString():null,
     }).returning({id:marketRequests.id,status:marketRequests.status});
+    // Priority 11 (docs/production-readiness.md): a referral code carried
+    // from app/r/[code]/page.tsx via app/quote/page.tsx's ?ref= query
+    // param. Best-effort, never blocks or fails the actual request.
+    const referralCode=typeof b.ref==="string"?b.ref.trim():"";
+    if(referralCode&&b.contact){
+      await recordReferralAttribution({code:referralCode,refereeContact:b.contact.trim(),marketRequestId:row.id,source:"intake_link"}).catch(()=>{});
+    }
     return Response.json({request:row},{status:201});
   }catch{return Response.json({error:"The verification desk is temporarily unavailable."},{status:500})}
 }

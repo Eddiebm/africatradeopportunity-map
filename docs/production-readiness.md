@@ -1390,7 +1390,191 @@ both directions — a deal owner WITH and WITHOUT a linked number) ·
 
 ---
 
-## Priorities 11–13
+## Priority 11 — Brokers, associations, referrals
+
+**Status: verified**, with one explicit, deliberate scope boundary
+carried over from the mission's own text, not a limitation found along
+the way: **no money-movement code exists anywhere in this priority** —
+"don't pay commissions until legal/accounting requirements are defined
+— may track pending/approved obligations without transferring money."
+
+**Files changed:** `db/schema.ts` (`referralPartners`,
+`referralAttributions`, `commissionRecords` — all new),
+`drizzle/0017_even_sphinx.sql` (migration, all new tables),
+`lib/referrals.ts` (new — code generation, attribution, fraud/self-
+referral checks, the public resolver), `app/api/referrals/route.ts`
+(new), `app/api/admin/commissions/route.ts` (new), `app/r/[code]/page.tsx`
+(new, public disclosure landing page), `app/api/market-requests/route.ts`
++ `app/quote/page.tsx` (carry an optional `ref` code through to
+attribution), `app/api/auth/register/route.ts` + `app/register/page.tsx`
+(same, for direct signups), `app/deal/[id]/page.tsx` +
+`app/components/DealPartiesAndReferrals.tsx` (new — post-deal UI),
+`app/admin/page.tsx` + `app/admin.css` (new Referrals tab),
+`tests/unit/referrals.test.ts` (new).
+
+**"Broker/association profiles" already existed** — `organizations` +
+`ORGANIZATION_ROLES` already included `"broker"` since Phase 2; this
+priority deliberately did not build a parallel profile system, only the
+referral/attribution/commission-tracking layer on top. Code creation is
+NOT role-gated: any real, active organization member can generate one —
+covering both a broker referring a client AND the mission's separate
+"post-deal: refer buyer/supplier" requirement with one mechanism instead
+of two.
+
+**The money-movement boundary is enforced structurally, not by
+convention** — `COMMISSION_STATUSES` in `db/schema.ts` has no `"paid"`
+value, so `app/api/admin/commissions/route.ts`'s whitelist check against
+that real enum cannot let a `"paid"` transition through even if someone
+tried; there is no function anywhere in this codebase that could execute
+one even if the status check were bypassed. Verified live as a genuine
+attack case, not just a code-read: a direct API call attempting
+`status:"paid"` → 400, and the record's real status in D1 confirmed
+unchanged.
+
+**"Protected buyer-broker relationships" — first-attribution-wins,
+verified with an actual contested case**: two real referral codes from
+two different organizations both attempted to attribute the SAME
+referee; the first attribution stayed `isPrimary:true`, the second was
+recorded (full audit history preserved, never silently dropped) but
+`isPrimary:false` with `fraudFlag:"duplicate_attribution"` — and does
+not count toward anything.
+
+**Fraud/self-referral controls, both checked against real rows, never
+inferred from a name/domain match**: the referring organization's OWNER
+cannot be attributed under their own code, and neither can a real,
+active MEMBER of that organization — both verified live (a broker
+attempting to self-refer still gets their quote request accepted
+normally, but the attribution itself is flagged `self_referral` and
+excluded from credit).
+
+**Disclosure of who pays commissions — a real, required field, not an
+afterthought**: `commissionRecords.payerParty` is mandatory at the API
+layer (`payerParty` empty → 400, "commissions must always disclose who
+pays them"), and `app/r/[code]/page.tsx`'s public disclosure text states
+the mechanism generically (a specific commission amount/payer is only
+ever decided per-deal by an administrator, long after a visitor sees
+this page — resolving a code returns ONLY a public organization name,
+structurally nothing else, so the disclosure page cannot leak a
+specific figure even by mistake).
+
+**Never revealed private deal details through referral links** —
+verified directly: the disclosure page's content never contains a
+dollar figure or any deal-specific text; `lib/referrals.ts`'s
+`resolveReferralPartner` return type has no field through which one
+could leak.
+
+**Post-deal actions, matching the mission's explicit list:**
+- *"Invite a participant"* — Priority 1 built `POST/DELETE
+  /api/deals/:id/parties` with no UI form calling it, a real gap
+  confirmed by inspection before building anything; `DealPartiesAndReferrals.tsx`
+  is that missing UI, reusing the existing API unchanged.
+- *"Refer buyer/supplier"* / *"transparent referral credit"* — the same
+  deal room now has a "Get a referral link" action generating a real
+  `/r/[code]` link for the deal owner's organization.
+- *"Start repeat transaction"* — a plain link on the deal page to
+  `/deal/new` prefilled with the real deal's product/HS
+  code/origin/destination, reusing `/deal/new`'s EXISTING query-param
+  prefill mechanism (built in an earlier phase, previously only reachable
+  from the Opportunity Finder) rather than duplicating that logic.
+- *"Reuse spec"* — covered by the same prefill link above.
+
+**A real bug found and fixed during Loop Engineering, not before
+shipping — caught by the live browser verification itself, not a code
+read**: the first draft of `app/api/admin/commissions/route.ts`'s GET
+filtered `referralAttributions` to `isPrimary:true` only, copying the
+(correct, for a different reason) filter already used in
+`app/api/referrals/route.ts`'s own GET. Since a fraud-flagged attribution
+is BY DEFINITION never primary, that filter silently hid every
+self-referral/duplicate-attribution flag from the admin Referrals tab —
+exactly the rows fraud review most needs to see. Caught live: the admin
+tab's "Flagged" section was rendering as if zero flags existed even
+though a real one had just been created in the same test run. Fixed by
+removing the filter from the admin GET specifically (the org's own
+performance-stat GET correctly keeps it — a different real question:
+"how many referees actually counted for me" vs. "show reviewers
+everything, including what didn't count").
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (52 warnings, +3
+over Priority 10's 49, the same pre-existing `no-html-link-for-pages`
+class; two real ERRORS were hit and fixed — unescaped apostrophes in
+JSX text, the same category caught in earlier priorities) ·
+**198/198 tests** (23 new: code generation/uniqueness, the public
+resolver's PII-free return shape, clean attribution, both self-referral
+cases, the contested-attribution protected-relationship proof with full
+history preserved, suspended/nonexistent-code no-ops, membership-gated
+code creation with a real 403 for a non-member, commission validation
+(`payerParty` required, basis-specific rate/flatAmount required, real
+deal/partner existence checks), the "paid" status attack rejected by
+the real enum whitelist, approval recording a real approver+timestamp,
+and end-to-end registration/quote-request attribution integration) ·
+`build` clean, all four new routes present in the route manifest.
+
+**Live browser + attack verification, not just unit tests:**
+- A real broker creates a real organization, generates a real referral
+  code. **Attack**: a non-member of that organization attempting the
+  same → 403.
+- The public `/r/[code]` page loads with zero console errors, discloses
+  the real organization's name, explains the commission mechanism
+  honestly ("never funded or transferred through this platform"), and
+  contains no dollar figure or deal detail.
+- The code carries through, as a real query param, from the disclosure
+  page → `/quote` → the real submission → a real, primary,
+  `fraudFlag:""` attribution row confirmed via direct D1 read.
+- **Attack**: the broker attempts to self-refer under their own code —
+  the quote request itself still succeeds normally (201), but the
+  attribution is flagged `self_referral` and NOT primary, confirmed via
+  direct D1 read — no credit silently granted.
+- An administrator records a real, tracked-only commission obligation.
+  **Attack**: a direct API call attempting `status:"paid"` → 400, the
+  record's real status confirmed unchanged in D1. The administrator CAN
+  approve it (a real, different action — marking an obligation
+  legitimate, not paying it) → 200.
+- The admin Referrals tab, loaded fresh: zero console errors, shows the
+  real broker organization, the real commission record, AND the real
+  flagged self-referral (the bug above, confirmed fixed by re-running
+  this exact live check after the fix).
+- A real deal room shows the real PARTICIPANTS and REFERRALS sections
+  with zero console errors; inviting a participant through the real UI
+  form creates a real `deal_parties` row, confirmed via direct D1 read
+  (not assumed from a 200 response); the real "Get a referral link"
+  button generates a real, working `/r/[code]` link; the real "Start a
+  repeat transaction" link is present.
+- **Attack**: an anonymous visitor attempting to invite a participant on
+  someone else's deal via a direct API call → 401.
+- **Accessibility tree** (a real Playwright snapshot): every link and
+  heading on the disclosure page has a real, non-empty accessible name;
+  keyboard Tab reaches a real focusable element first. Mobile viewport
+  (390×844): no horizontal overflow.
+
+**Remaining risks, explicitly deferred:**
+- **No money-movement code — by design, per the mission's own stopping
+  condition, not an oversight.** Approving a commission record is a
+  platform decision that an obligation is legitimate and tracked; it is
+  never a payment instruction. Building an actual payment/disbursement
+  path requires a legal/accounting decision this session cannot make.
+- No fraud check for a referrer generating MANY codes to route around
+  the duplicate-attribution protection (e.g., referring the same
+  contested lead under a freshly generated second code from the SAME
+  org) — the current check only catches a referee already having a
+  PRIMARY attribution from ANY code, which does catch this case at the
+  attribution level, but a determined actor cycling through many orgs
+  they control is not specifically detected; a real limitation for a
+  future fraud-review pass, not hidden.
+- Commission amounts are entered by a reviewer, not computed
+  automatically from the deal's actual landed cost/quote — Priority 12
+  (landed-cost accuracy) is the natural future source for an
+  auto-suggested `rate`/`flatAmount`, not wired together yet.
+- No email/WhatsApp notification when a referral converts into a real
+  attribution or a commission is approved — the referring organization
+  currently has to check the admin GET (`/api/referrals`) themselves;
+  Priority 10's `sendWhatsAppMessage` primitive could carry this later,
+  not wired in this priority to keep the change focused.
+
+**Commit:** `pending`
+
+---
+
+## Priorities 12–13
 
 Not started. Worked next, one focused commit (or a few) per priority,
 each getting its own dated section here — never marked verified without
