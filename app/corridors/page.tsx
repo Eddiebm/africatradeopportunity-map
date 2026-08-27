@@ -107,7 +107,7 @@ export default async function Corridors() {
           {operational.length ? (
             operational.map((c) => <CorridorRow key={`${c.origin}-${c.destination}-${c.version}`} c={c} />)
           ) : (
-            <p style={{ fontSize: 11, color: "#889" }}>No corridors currently in this tier.</p>
+            <p style={{ fontSize: 11, color: "#757588" }}>No corridors currently in this tier.</p>
           )}
         </article>
 
@@ -125,7 +125,7 @@ export default async function Corridors() {
           {verified.length ? (
             verified.map((c) => <CorridorRow key={`${c.origin}-${c.destination}-${c.version}`} c={c} />)
           ) : (
-            <p style={{ fontSize: 11, color: "#889" }}>No corridors currently in this tier.</p>
+            <p style={{ fontSize: 11, color: "#757588" }}>No corridors currently in this tier.</p>
           )}
         </article>
       </section>
@@ -145,7 +145,7 @@ function CorridorRow({ c }: { c: PublicCorridor }) {
           {c.status} · confidence: {c.confidence} · {c.expectedTiming || "timing not documented"}
           {c.lastReviewedAt ? ` · reviewed ${c.lastReviewedAt.slice(0, 10)}` : " · not yet reviewed"}
         </small>
-        {c.sourceAttribution && <em style={{ fontSize: 10, color: "#789" }}>{c.sourceAttribution}</em>}
+        {c.sourceAttribution && <em style={{ fontSize: 10, color: "#657687" }}>{c.sourceAttribution}</em>}
       </span>
     </div>
   );

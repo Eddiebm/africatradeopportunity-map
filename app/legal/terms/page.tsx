@@ -14,7 +14,7 @@ export default function Terms() {
         </nav>
       </header>
       <section className="portalempty" style={{ margin: "48px 6vw", maxWidth: 820 }}>
-        <p style={{ fontSize: 9, letterSpacing: ".16em", color: "#ad7721" }}>DRAFT — REQUIRES LEGAL COUNSEL REVIEW</p>
+        <p style={{ fontSize: 9, letterSpacing: ".16em", color: "#8f621b" }}>DRAFT — REQUIRES LEGAL COUNSEL REVIEW</p>
         <h1>Terms of Service</h1>
         <p>
           This placeholder exists so account creation has somewhere to point during development. It is not a
