@@ -519,6 +519,24 @@ export const securityEvents = sqliteTable("security_events", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+// Priority 3 (docs/production-readiness.md): "Cron-run history" +
+// "Cron failure visibility." Before this, the daily intelligence-watchlist
+// refresh (worker/index.ts's scheduled() handler) only ever
+// console.log'd its outcome — visible for as long as a `wrangler tail`
+// session happens to be open, and nowhere else. This persists every run
+// so "did last night's refresh actually happen, and did it succeed?" is
+// a query, not a hope that someone was tailing logs at 3am.
+export const cronRuns = sqliteTable("cron_runs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  jobName: text("job_name").notNull(),
+  startedAt: text("started_at").notNull(),
+  finishedAt: text("finished_at"),
+  status: text("status").notNull().default("running"), // running | success | failed
+  refreshedCount: integer("refreshed_count"),
+  failedCount: integer("failed_count"),
+  errorMessage: text("error_message"),
+});
+
 // docs/AUDIT.md §5 item 8: "No idempotency keys on deal creation, dispute
 // creation, or match interest — a retried POST creates a duplicate
 // deal/dispute record." (Match interest was actually already safe — see

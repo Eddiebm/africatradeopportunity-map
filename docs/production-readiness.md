@@ -256,7 +256,135 @@ here).
 
 ---
 
-## Priorities 3–13
+## Priority 3 — Reliability, observability, and recovery
+
+**Status: verified** (implementation + automated checks + live-system
+verification; paging/alerting and rehearsed restore drills are explicitly
+NOT done — see "Remaining risks").
+
+**Files changed:** `lib/observability.ts` (new), `lib/cron-runs.ts` (new),
+`app/api/health/route.ts` (new), `app/api/admin/cron-runs/route.ts`
+(new), `app/not-found.tsx` (new), `app/error.tsx` (new),
+`worker/index.ts`, `db/schema.ts` (migrations `0010`+`0011`),
+`docs/DEPLOYMENT.md` (backup/restore + R2 retention/recovery sections
+added), `docs/RUNBOOK.md` (new), `tests/unit/cron-runs.test.ts`,
+`tests/unit/observability.test.ts`,
+`tests/unit/health-and-cron-runs-route.test.ts` (all new).
+
+**Migrations:** `0011_condemned_kabuki.sql` — additive, `cron_runs`
+table only (`0010` was Priority 2's `security_events` table, already
+recorded above).
+
+**What this closes:**
+- **Structured server-side error logging + request/correlation IDs**:
+  `worker/index.ts`'s `fetch()` now generates one correlation id per
+  request (or reuses an inbound `x-correlation-id` if present), threads
+  it onto the request (readable by any downstream Route Handler) and
+  every response (so a user-reported failure can be tied to a specific
+  server log line), and wraps the entire `handler.fetch()` call in a
+  try/catch — the last line of defense for anything that slips past an
+  individual route's own try/catch (most already returned clean JSON
+  errors before this priority; this catches what didn't). Logs one
+  structured JSON line per unexpected error (`lib/observability.ts`),
+  never a request body/cookie/token.
+- **Health endpoint**: `GET /api/health`, public/unauthenticated
+  (matches what an uptime monitor needs), checks real D1 connectivity.
+- **Cron-run history + failure visibility**: `cron_runs` table
+  (`lib/cron-runs.ts` wraps the existing watchlist-refresh job),
+  `GET /api/admin/cron-runs` (administrator-only — can include an error
+  message the public health check deliberately never exposes).
+- **Safe error pages**: `app/not-found.tsx` and `app/error.tsx` — the
+  latter never surfaces `error.message`/`.stack` to the browser; the
+  correlation id already logged server-side is the real debugging
+  thread.
+- **Documented D1 backup/restore + R2 retention/recovery**: expanded
+  `docs/DEPLOYMENT.md` — backup command already existed; added an
+  honest restore procedure (including the harder point-in-time case,
+  which D1 doesn't support natively) and an R2 section that names what
+  IS handled (orphaned-object cleanup on a failed upload, already true
+  before this priority) versus what ISN'T (no retention policy — flagged
+  as needing legal input, not invented here; no versioning/backup
+  target wired).
+- **Operational runbook**: `docs/RUNBOOK.md` — written against the
+  actual signals this app now has (`/api/health`, `wrangler tail`
+  correlation ids, `/api/admin/cron-runs`, `security_events`,
+  the existing `*_events`/`*_audit_events` tables), not a generic
+  template. Explicitly documents its own gaps (no paging, no admin-desk
+  UI yet for account suspension/session revocation) rather than
+  implying more coverage than exists.
+- **Retry-safe/idempotent actions, duplicate-submission protection**:
+  already done earlier this session (`lib/idempotency.ts`, commit
+  `533f3f4`, before this priority's spec arrived) — noted here for
+  completeness since it's explicitly a Priority 3 acceptance item.
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (40 total — the
+38-warning baseline plus 2 new `no-html-link-for-pages` warnings from
+`not-found.tsx`/`error.tsx`'s own nav links, the same pre-existing,
+already-downgraded category as every other page) · **71/71 tests** (10
+new: `recordCronRun` persists both success and failure with real
+timestamps and proves a "running" row is visible mid-flight;
+`logServerError` emits correct structured JSON and never throws on a
+non-Error value; `/api/health` returns real DB-check status;
+`/api/admin/cron-runs` requires auth, requires administrator
+specifically, and returns real rows newest-first) · `build` clean.
+Migrations `0010`+`0011` both applied to a disposable local D1.
+
+**Browser/live-system flows verified (not just unit tests):**
+- `curl`+Playwright against a live dev server: `/api/health` returns
+  `200 {"status":"ok","checks":{"database":"ok"}}` with an
+  `x-correlation-id` response header present and unique per request.
+- A guessed nonexistent URL returns real HTTP 404 AND renders the actual
+  hydrated `not-found.tsx` content (heading text checked, not just the
+  status code) with a working link back.
+- **The actual Cron Trigger path end-to-end**: hit
+  `vinext dev`'s `/cdn-cgi/handler/scheduled` test endpoint for real (not
+  mocked) → confirmed via direct D1 query that a `cron_runs` row was
+  written with `status: "success"`, real `started_at`/`finished_at`
+  timestamps, and correct counts → then registered a real user, promoted
+  them to `administrator` via D1, and confirmed
+  `GET /api/admin/cron-runs` returns that exact live-run row through the
+  actual authenticated API path (not a seeded fixture).
+- `GET /api/admin/cron-runs` unauthenticated → 401, confirmed live.
+
+**Security cases tested:** cron-run history (which can contain error
+detail) confirmed administrator-only, both via unit test (non-admin gets
+403) and live (no session gets 401); confirmed the health endpoint
+exposes nothing beyond an ok/error boolean (no stack traces, no row
+counts, no internals) even though it's intentionally public.
+
+**Accessibility:** not re-checked this pass — `not-found.tsx`/`error.tsx`
+reuse the same `.portal`/`.portalempty` markup and skip-link-eligible
+structure as pages already covered in Priority 1's keyboard pass; not
+independently re-verified with a fresh keyboard/screen-reader pass.
+
+**Defects found and fixed:** two `react/no-unescaped-entities` lint
+errors in the new `not-found.tsx`/`error.tsx` copy (straightforward
+apostrophe-escaping issue, fixed and re-verified — lint went from 3
+errors back to 0 before anything was committed).
+
+**Remaining risks, explicitly deferred:**
+- No paging/alerting on any of these signals — an operator has to
+  actively check them. Documented as a known gap in `docs/RUNBOOK.md`
+  itself rather than left implicit.
+- No admin-desk UI action for account suspension or forced
+  session-revocation — both require direct D1 access today. Real
+  operational risk during an actual incident; flagged, not solved here.
+- Backup/restore is a real, documented procedure but not a rehearsed,
+  timed drill, and there's no scheduled/automated backup Cron Trigger.
+- R2 retention policy is explicitly NOT set — flagged as needing legal
+  input given this platform handles trade/customs/identity documents,
+  not invented as a default here.
+- Correlation ids and the central error-logging catch cover the
+  outermost Worker boundary; they do not retrofit structured logging
+  into every individual route's existing try/catch blocks (those already
+  returned safe, generic error JSON before this priority — this adds a
+  safety net underneath them, not a rewrite of them).
+
+**Commit:** `pending`
+
+---
+
+## Priorities 4–13
 
 Not started. Worked next, one focused commit (or a few) per priority,
 each getting its own dated section here — never marked verified without

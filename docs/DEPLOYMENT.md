@@ -136,6 +136,83 @@ this project forbid destructive schema changes without a migration *and
 backup* plan: `wrangler d1 export tradesafe-africa-db --remote --output backup.sql`
 before applying anything that drops or renames a column or table.
 
+## 9. D1 backup and restore
+
+**Backup** (do this before every destructive migration, and ideally on a
+schedule once this ships — there is no automated backup Cron Trigger yet,
+see docs/production-readiness.md's Priority 3 entry):
+
+```bash
+wrangler d1 export tradesafe-africa-db --remote --output backup-$(date +%Y%m%d-%H%M).sql
+```
+
+This produces a plain SQL dump (schema + data) you should store somewhere
+outside the Cloudflare account itself (this repo's CI runner, encrypted
+cloud storage, etc.) — a backup that only exists inside the same account
+you're protecting against doesn't protect against an account-level
+incident.
+
+**Restore** — there are two real scenarios, handled differently:
+
+- *Full restore to a fresh/empty D1 database* (e.g. recreating the
+  database entirely): `wrangler d1 execute tradesafe-africa-db --remote
+  --file backup-YYYYMMDD-HHMM.sql`. This replays the dump's `CREATE
+  TABLE`/`INSERT` statements directly — only safe against a database that
+  doesn't already have conflicting tables/rows.
+- *Point-in-time recovery into a database that still has other, newer,
+  legitimate data* — this is the harder and more realistic case (e.g. "an
+  admin action three hours ago corrupted `deals`, but users have placed
+  real orders since"). D1 has no native point-in-time restore. The
+  practical path: `wrangler d1 execute ... --file backup.sql` into a
+  **new, separate** D1 database, then hand-write and review a targeted
+  `INSERT`/`UPDATE` migration that repairs only the affected rows in the
+  live database, cross-checking against `admin_audit_events` /
+  `deal_events` / `security_events` to reconstruct what legitimately
+  happened after the backup was taken. This is inherently a manual,
+  reviewed process — there is no one-command fix for "undo the last N
+  hours" once real user activity has continued past the backup point.
+
+**Not yet automated**: a scheduled backup Cron Trigger, backup retention
+policy, and a tested restore drill. Documented here as an explicit
+remaining risk (see docs/production-readiness.md), not implemented —
+doing so safely needs off-account storage credentials this environment
+doesn't have.
+
+## 10. R2 document retention and recovery
+
+Deal documents live in the `tradesafe-africa-documents` R2 bucket
+(`wrangler.jsonc`), referenced by `document_files.storage_key`
+(`db/schema.ts`) — D1 holds the metadata, R2 holds the bytes. They are
+**not** currently kept in sync by anything transactional: a D1 row and
+its R2 object are written in the same request
+(`app/api/deals/[id]/documents/route.ts`) but not inside a single atomic
+operation (D1 and R2 are separate systems; Workers has no cross-service
+transaction primitive for this). The existing upload route already
+handles the one failure mode this creates (an R2 write that succeeds but
+the following D1 insert throws): it deletes the just-written R2 object in
+that case, so a failed upload doesn't leave an orphaned object with no
+metadata pointing at it.
+
+**Retention**: no lifecycle/expiration policy is configured on the bucket
+— documents persist indefinitely today. That is very likely wrong for a
+platform handling trade/customs/identity documents (regulatory retention
+requirements vary by document type and jurisdiction, and this project's
+working rules explicitly forbid inventing a retention policy without
+legal input) — flagged here as a decision that needs counsel, not
+something to default silently.
+
+**Recovery**: R2 has no built-in point-in-time restore either. The
+practical mitigation available today: `document_files.sha256` is
+recorded on every upload, so a corrupted-in-place object (bytes changed,
+metadata unchanged) is at least *detectable* by re-hashing and comparing
+— nothing currently runs that check automatically. A deleted object is
+unrecoverable unless R2 versioning is enabled on the bucket (not
+currently enabled) or R2's event notifications are wired to an external
+backup target (not currently wired). Both are real, cheap improvements
+that need a deliberate decision on retention/cost trade-offs, not code
+alone — see docs/production-readiness.md's remaining-risk entry for
+Priority 3.
+
 ## Secrets this app currently needs
 
 | Secret | Set with | Used by |

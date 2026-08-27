@@ -2,6 +2,8 @@
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
 import { refreshStaleWatchlist } from "../lib/trade-intelligence";
+import { logServerError, newCorrelationId } from "../lib/observability";
+import { recordCronRun } from "../lib/cron-runs";
 
 interface Env {
   ASSETS: Fetcher;
@@ -38,6 +40,8 @@ const WATCHLIST_REFRESH_BATCH_SIZE = 15;
 // dangerouslyAllowSVG: true in next.config.js and uncomment below:
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
+const CORRELATION_HEADER = "x-correlation-id";
+
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
@@ -53,7 +57,33 @@ const worker = {
       }, allowedWidths);
     }
 
-    return handler.fetch(request, env, ctx);
+    // Priority 3 (docs/production-readiness.md): "Request and correlation
+    // IDs" + "Structured server-side error logging." Generated once, at
+    // the outermost point every request passes through, then threaded
+    // onto the request (so proxy.ts and every Route Handler downstream
+    // can read it back if they want it) and onto the response (so a
+    // support conversation — "it broke, here's the id in dev tools" —
+    // can be tied straight to a `wrangler tail` line). This try/catch is
+    // the LAST line of defense: individual routes already return clean
+    // JSON errors from their own try/catch (see docs/AUDIT.md's note that
+    // this was already true before this priority) — this only fires for
+    // something that slipped past all of them, so a raw exception + stack
+    // trace never reaches a real user's browser as a broken response.
+    const correlationId = request.headers.get(CORRELATION_HEADER) || newCorrelationId();
+    const requestWithId = new Request(request, { headers: new Headers(request.headers) });
+    requestWithId.headers.set(CORRELATION_HEADER, correlationId);
+
+    try {
+      const response = await handler.fetch(requestWithId, env, ctx);
+      response.headers.set(CORRELATION_HEADER, correlationId);
+      return response;
+    } catch (error) {
+      logServerError(correlationId, { method: request.method, pathname: url.pathname }, error);
+      return new Response(
+        JSON.stringify({ error: "Something went wrong. This has been logged.", correlationId }),
+        { status: 500, headers: { "content-type": "application/json", [CORRELATION_HEADER]: correlationId } },
+      );
+    }
   },
 
   // Cron Trigger (see wrangler.jsonc's "triggers.crons") — refreshes the
@@ -65,12 +95,16 @@ const worker = {
   // every Route Handler in this app already uses.
   async scheduled(_event: ScheduledEvent, _env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(
-      // console.log is the only observability a Cron Trigger has — shows up
-      // in the dashboard Logs / `wrangler tail` (wrangler.jsonc's
-      // observability.enabled).
-      refreshStaleWatchlist(WATCHLIST_REFRESH_BATCH_SIZE).then((result) => {
-        console.log(`[intelligence-watchlist] refreshed ${result.refreshed}, failed ${result.failed}`);
-      }),
+      // recordCronRun (lib/cron-runs.ts) persists this to db/schema.ts's
+      // cronRuns table — console.log is still useful as a live tail, but
+      // is no longer the ONLY record of whether this ran and succeeded.
+      recordCronRun("intelligence-watchlist-refresh", () => refreshStaleWatchlist(WATCHLIST_REFRESH_BATCH_SIZE))
+        .then((result) => {
+          console.log(`[intelligence-watchlist] refreshed ${result.refreshed}, failed ${result.failed}`);
+        })
+        .catch((error) => {
+          logServerError(newCorrelationId(), { method: "CRON", pathname: "intelligence-watchlist-refresh" }, error);
+        }),
     );
   },
 };
