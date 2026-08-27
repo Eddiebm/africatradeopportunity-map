@@ -380,7 +380,7 @@ errors back to 0 before anything was committed).
   returned safe, generic error JSON before this priority — this adds a
   safety net underneath them, not a rewrite of them).
 
-**Commit:** `pending`
+**Commit:** `558c90d`
 
 ---
 
