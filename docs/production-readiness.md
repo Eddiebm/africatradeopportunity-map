@@ -1706,7 +1706,7 @@ gating, range sanity checks, and actual-requires-a-source rule) ·
   1–4's existing, working `dealCosts` write path; flagged as a
   cleanup opportunity, not addressed here.
 
-**Commit:** `pending`
+**Commit:** `0211d9a`
 
 ---
 
