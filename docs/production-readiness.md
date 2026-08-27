@@ -508,7 +508,7 @@ correctness bug found while wiring the formatter, not a hypothetical).
 - Color contrast was not measured with a contrast-ratio tool (no
   automated contrast checker was run against this app's palette).
 
-**Commit:** `pending`
+**Commit:** `cc10361`
 
 ---
 
