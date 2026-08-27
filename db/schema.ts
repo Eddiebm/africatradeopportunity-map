@@ -175,6 +175,16 @@ export const deals = sqliteTable("deals", {
   targetDate: text("target_date").notNull().default(""),
   stage: text("stage").notNull().default("intake"),
   riskStatus: text("risk_status").notNull().default("unscored"),
+  // Priority 5 (docs/production-readiness.md): "Historical deals must
+  // retain the corridor-template version under which they were
+  // created." corridorTemplates rows are immutable once created — an
+  // edit always inserts a new version row (see that table's header
+  // comment) — so pointing at a specific row IS pointing at a specific
+  // version, permanently, even after a newer version is published.
+  // Nullable: most corridors have no template yet (see CORRIDOR_STATUS
+  // tiers — "intelligence coverage" is every country with no template at
+  // all).
+  corridorTemplateId: integer("corridor_template_id").references(() => corridorTemplates.id),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
@@ -576,3 +586,74 @@ export const idempotencyKeys = sqliteTable(
     userEndpointKey: uniqueIndex("idempotency_keys_user_endpoint_key").on(table.userId, table.endpoint, table.key),
   }),
 );
+
+// Priority 5 (docs/production-readiness.md): "Create explicit
+// distinctions between: Intelligence coverage / Operationally supported
+// corridors / TradeSafe Verified corridors." All 54 countries already
+// have intelligence coverage (the existing Opportunity
+// Finder/import-intelligence work) — that tier needs no table, it's just
+// "every country." A corridor becomes "operationally supported" the
+// moment ANY template row exists for it (draft or reviewed), and
+// "TradeSafe Verified" specifically when a template's status is
+// 'operational'. See lib/corridor-templates.ts for the tier-resolution
+// logic and app/corridors/page.tsx for where this distinction is surfaced.
+//
+// IMMUTABLE VERSIONING: a template is never UPDATEd in place. Editing one
+// means inserting a new row with the same corridorKey and version+1 —
+// this is what makes db/schema.ts's deals.corridorTemplateId a genuine,
+// permanent historical record ("what rules applied when this deal was
+// created") rather than a pointer that silently changes meaning under
+// a deal that's already in flight.
+export const CORRIDOR_TEMPLATE_STATUSES = ["draft", "reviewed", "operational", "suspended"] as const;
+export type CorridorTemplateStatus = (typeof CORRIDOR_TEMPLATE_STATUSES)[number];
+export const CORRIDOR_TEMPLATE_CONFIDENCE = ["low", "medium", "high"] as const;
+export type CorridorTemplateConfidence = (typeof CORRIDOR_TEMPLATE_CONFIDENCE)[number];
+
+export const corridorTemplates = sqliteTable("corridor_templates", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  // Groups every version of "the same" corridor together — a plain,
+  // stable string (e.g. "GH-NG") rather than a separate lookup table,
+  // matching this schema's existing preference for simple text keys over
+  // extra join tables where nothing else needs to reference the group
+  // itself (see e.g. dealParties.role reusing ORGANIZATION_ROLES as a
+  // vocabulary instead of a table).
+  corridorKey: text("corridor_key").notNull(),
+  version: integer("version").notNull().default(1),
+  origin: text("origin").notNull(),
+  destination: text("destination").notNull(),
+  productCategoriesJson: text("product_categories_json").notNull().default("[]"),
+  requiredBuyerInfo: text("required_buyer_info").notNull().default(""),
+  requiredSupplierInfo: text("required_supplier_info").notNull().default(""),
+  requiredDocumentsJson: text("required_documents_json").notNull().default("[]"),
+  verificationRequirements: text("verification_requirements").notNull().default(""),
+  // [{name, percentage, releaseCondition}, ...] — same shape as
+  // db/schema.ts's milestones table, deliberately: a real deal's
+  // milestones (app/api/deals/route.ts's POST) are meant to eventually
+  // be seeded FROM the matching template's standardMilestonesJson rather
+  // than the current hardcoded four-milestone default, once a corridor
+  // actually has a reviewed template — not wired yet (see remaining
+  // risks in docs/production-readiness.md), the schema is ready for it.
+  standardMilestonesJson: text("standard_milestones_json").notNull().default("[]"),
+  evidenceRequiredJson: text("evidence_required_json").notNull().default("{}"),
+  // Reuses ORGANIZATION_ROLES (see near the top of this file) — the same
+  // vocabulary dealParties.role already uses.
+  approvedPartnerRolesJson: text("approved_partner_roles_json").notNull().default("[]"),
+  expectedTiming: text("expected_timing").notNull().default(""),
+  // [{component, typicalRange, source}, ...] — Priority 12 (landed-cost
+  // accuracy) is the natural consumer of this once that priority is
+  // built; not wired together yet.
+  costComponentsJson: text("cost_components_json").notNull().default("[]"),
+  riskRules: text("risk_rules").notNull().default(""),
+  escalationRules: text("escalation_rules").notNull().default(""),
+  // Where these rules actually came from — never optional in spirit
+  // (defaults to "" only because SQLite has no way to enforce "must be
+  // filled in before status can leave draft" at the column level; that
+  // check belongs in the API layer, see app/api/admin/corridor-templates/route.ts).
+  sourceAttribution: text("source_attribution").notNull().default(""),
+  lastReviewedAt: text("last_reviewed_at"),
+  reviewerEmail: text("reviewer_email").notNull().default(""),
+  confidence: text("confidence").notNull().default("low"),
+  status: text("status").notNull().default("draft"),
+  createdByEmail: text("created_by_email").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

@@ -512,7 +512,112 @@ correctness bug found while wiring the formatter, not a hypothetical).
 
 ---
 
-## Priorities 5–13
+## Priority 5 — Corridor operating templates
+
+**Status: verified.**
+
+**Files changed:** `db/schema.ts` (migration `0012`: `corridor_templates`
+table + `deals.corridorTemplateId`), `lib/corridor-templates.ts` (new),
+`app/api/admin/corridor-templates/route.ts` (new),
+`app/api/corridor-templates/route.ts` (new), `app/corridors/page.tsx`
+(new), `app/api/deals/route.ts` (attaches the current template at
+creation time), `tests/unit/corridor-templates.test.ts` (new).
+
+**Migration:** `0012` — additive: new `corridor_templates` table, one
+new nullable FK column on `deals`.
+
+**Data model:** immutable, versioned rows — editing a corridor never
+UPDATEs an existing row, it INSERTs a new one with the same
+`corridorKey` and `version + 1` (enforced in
+`lib/corridor-templates.ts`'s `createCorridorTemplateVersion`, verified
+by a test that edits a corridor twice and confirms the first version's
+row is byte-for-byte untouched). `deals.corridorTemplateId` is set once,
+at creation time, to whichever version was current then — a later edit
+to that corridor creates a new row and never touches the deal's existing
+reference, which is what makes "historical deals retain the
+corridor-template version under which they were created" actually true
+rather than aspirational.
+
+**Three-tier distinction**, all real and queryable, not just described
+in prose:
+- **Intelligence coverage** — every one of the 54 countries the existing
+  Opportunity Finder/import-intelligence work already covers (Phase 4).
+  No new table needed; this tier is simply "any corridor with no
+  template row at all."
+- **Operationally supported** — a `corridor_templates` row exists with
+  status `draft` or `reviewed`.
+- **TradeSafe Verified** — the corridor's CURRENT version specifically
+  has status `operational`. An older, since-superseded operational
+  version does not count — only the latest version's status reflects
+  where the corridor stands today (tested explicitly).
+- Enforced at the API layer, not just the UI: `POST
+  /api/admin/corridor-templates` rejects a `reviewed`/`operational`
+  status submitted without both a real `sourceAttribution` and a real
+  `reviewerEmail` — the same "never fabricate verification" ethic this
+  app already applies everywhere else, applied here too rather than
+  left as a documentation-only expectation.
+
+**Public vs. admin split:** `GET /api/corridor-templates` is
+unauthenticated (a prospective trader needs to see this before signing
+up) and deliberately excludes `riskRules`/`escalationRules`/
+`requiredBuyerInfo`/`requiredSupplierInfo` — internal operational detail,
+not something to publish. `GET`/`POST /api/admin/corridor-templates` is
+administrator-only and sees everything, including full version history.
+
+**The one demonstration corridor** (Ghana → Nigeria): seeded via a real
+call to the real admin API from a real registered-and-promoted
+administrator account during live verification — not a hand-crafted SQL
+insert — so the seed itself proves the API works end-to-end. Every text
+field is explicitly prefixed `DEMONSTRATION DATA` /
+`DEMONSTRATION CORRIDOR`, and `sourceAttribution` states outright: "Not
+sourced from any real regulatory or operational review. Do not treat as
+current or accurate." Confirmed this label is actually visible on the
+public `/corridors` page, not just present in the database.
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (42 total — 2 new
+expected `no-html-link-for-pages` warnings from `/corridors`' own nav
+links, same downgraded category as every other page) · **91/91 tests**
+(14 new: tier resolution across all three states, immutable-versioning
+proof, admin auth/role/validation guards, public-API field exclusion,
+suspended-corridor exclusion, current-version-only collapsing) · `build`
+clean.
+
+**Live browser flows verified, not just unit tests:**
+- **Attack case**: a real, non-admin trader account attempting
+  `POST /api/admin/corridor-templates` directly → 403.
+- The real seed (above) via the real authenticated admin API.
+- `/corridors` (public, real page load) shows the demonstration corridor
+  under Tier 3 with the DEMONSTRATION label visible in the rendered
+  page, and the page states all three tier names explicitly.
+- The public API response was checked byte-for-byte to confirm none of
+  the internal-only field content leaked through.
+- **The actual point of the versioning model**: created a real deal for
+  Ghana → Nigeria through the real `/deal/new` form, then queried D1
+  directly and confirmed `deals.corridor_template_id` was set to the
+  real seeded template's id (version 1) — and, as a control, created a
+  second real deal for an unrelated corridor (Kenya → Uganda, which has
+  no template) and confirmed its `corridor_template_id` is `null` — the
+  attachment logic activates only when a real match exists, not always.
+
+**Remaining risks, explicitly deferred:**
+- `standardMilestonesJson`/`costComponentsJson` exist on the schema and
+  are populated on the demonstration corridor, but deal creation
+  (`app/api/deals/route.ts`) still seeds every deal's milestones from the
+  same hardcoded four-step default regardless of whether a matching
+  template exists — the schema is ready for a template to actually drive
+  a deal's milestones, that wiring isn't built yet.
+- No admin UI for managing corridor templates — API only, tested via
+  direct calls; an operator today would need to call the API directly
+  (or a future admin-desk tab) rather than use a form.
+- Only one demonstration corridor exists; this priority intentionally
+  does not attempt real corridor coverage for any actual market, per
+  "Do not attempt to operationalize every African country."
+
+**Commit:** `pending`
+
+---
+
+## Priorities 6–13
 
 Not started. Worked next, one focused commit (or a few) per priority,
 each getting its own dated section here — never marked verified without

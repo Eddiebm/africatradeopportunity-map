@@ -1,6 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { requireUserOrResponse, type SessionUser } from "../../../lib/auth/current-user";
 import { withIdempotency } from "../../../lib/idempotency";
+import { corridorKeyFor, getCurrentTemplate } from "../../../lib/corridor-templates";
 import { getDb } from "../../../db";
 import { dealCosts, dealDocuments, dealEvents, deals, milestones, verificationChecks } from "../../../db/schema";
 
@@ -40,18 +41,30 @@ async function createDeal(req: Request, user: SessionUser) {
     }
     const reference = `TS-${new Date().getUTCFullYear()}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
     const db = getDb();
+    const origin = String(body.origin);
+    const destination = String(body.destination);
+    // Priority 5 (docs/production-readiness.md): "Historical deals must
+    // retain the corridor-template version under which they were
+    // created." Attached at creation time, permanently — later template
+    // edits create a NEW version row (see lib/corridor-templates.ts) and
+    // never touch this deal's reference to the version that applied when
+    // it was opened. Nullable and silent when no template exists yet —
+    // most corridors have none (see app/corridors/page.tsx's
+    // "intelligence coverage" tier), and that's not an error.
+    const corridorTemplate = await getCurrentTemplate(corridorKeyFor(origin, destination));
     const [deal] = await db.insert(deals).values({
       reference,
       ownerEmail: user.email,
       requestType: String(body.requestType),
       product: String(body.product),
       hsCode: String(body.hsCode ?? ""),
-      origin: String(body.origin),
-      destination: String(body.destination),
+      origin,
+      destination,
       quantity: Number(body.quantity || 0),
       unit: String(body.unit || "tonnes"),
       currency: String(body.currency || "USD"),
       targetDate: String(body.targetDate || ""),
+      corridorTemplateId: corridorTemplate?.id ?? null,
     }).returning();
 
     await db.insert(dealCosts).values({
