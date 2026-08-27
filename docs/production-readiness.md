@@ -1386,7 +1386,7 @@ both directions — a deal owner WITH and WITHOUT a linked number) ·
   origin or every secure link generated will point at a non-existent
   domain.
 
-**Commit:** `pending`
+**Commit:** `9a6451e`
 
 ---
 
