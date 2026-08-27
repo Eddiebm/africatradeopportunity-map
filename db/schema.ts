@@ -199,11 +199,24 @@ export const dealParties = sqliteTable("deal_parties", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   dealId: integer("deal_id").notNull().references(() => deals.id),
   organizationId: integer("organization_id").references(() => organizations.id),
+  // Reuses ORGANIZATION_ROLES (see above) rather than a parallel enum —
+  // a deal party is acting in the same role vocabulary an organization
+  // already uses (buyer, supplier, freight_provider, inspector, broker,
+  // partner_institution), validated at the app layer in
+  // app/api/deals/[id]/parties/route.ts.
   role: text("role").notNull(),
   name: text("name").notNull().default(""),
   contact: text("contact").notNull().default(""),
+  // Verification status of this party's own claim (parallels
+  // organizations.verificationStatus) — NOT whether they're still on the
+  // deal; see removedAt for that, mirroring organizationMembers' own
+  // status vs. removedAt split.
   status: text("status").notNull().default("reported"),
   verifiedAt: text("verified_at"),
+  assignedByEmail: text("assigned_by_email").notNull().default(""),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  removedAt: text("removed_at"),
+  removedByEmail: text("removed_by_email"),
 });
 
 export const verificationChecks = sqliteTable("verification_checks", {

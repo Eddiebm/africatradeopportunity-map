@@ -1,5 +1,6 @@
 import { asc, eq } from "drizzle-orm";
 import { requireUser } from "../../../lib/auth/current-user";
+import { canParticipateInDispute, resolveDealViewAccess } from "../../../lib/auth/deal-access";
 import { getDb } from "../../../db";
 import { disputeEvents, disputeMessages, disputes } from "../../../db/schema";
 import DisputeMessageForm from "../../components/DisputeMessageForm";
@@ -14,12 +15,16 @@ export default async function DisputeDetail({ params }: { params: Promise<{ id: 
   const db = getDb();
   const [dispute] = await db.select().from(disputes).where(eq(disputes.id, id)).limit(1);
 
-  const isOwner = Boolean(dispute && dispute.openedByEmail === user.email);
   const isReviewer = Boolean(user.platformRole && REVIEWER_ROLES.includes(user.platformRole));
+  // docs/AUDIT.md Priority 1: a legitimate counterparty on the underlying
+  // deal — not just whoever opened the case — can now view this page too.
+  // See lib/auth/deal-access.ts's canParticipateInDispute.
+  const dealAccess = dispute ? await resolveDealViewAccess(dispute.dealId, user) : null;
+  const canView = Boolean(dispute && canParticipateInDispute(dispute, dealAccess, user));
 
   // Not-found and not-authorized render identically — see the same
   // convention in app/api/disputes/[id]/route.ts.
-  if (!dispute || (!isOwner && !isReviewer)) {
+  if (!dispute || !canView) {
     return <main className="portal"><section className="portalempty"><h1>Dispute not found</h1><a href="/disputes">Return to the resolution center</a></section></main>;
   }
 

@@ -32,6 +32,10 @@ export default function Login() {
 
   return (
     <main className="portal">
+      {/* WCAG 2.4.1 Bypass Blocks — found via a real keyboard-only pass
+          (Tab landed on header nav before the sign-in form). Visually
+          hidden until focused; see app/globals.css's .skip-link. */}
+      <a className="skip-link" href="#signin-form">Skip to sign-in form</a>
       <header>
         <div className="brand">
           <i>TS</i>
@@ -51,7 +55,10 @@ export default function Login() {
           <h1>Sign in to your trade desk</h1>
         </div>
       </section>
-      <form className="dealform" onSubmit={submit} style={{ gridTemplateColumns: "1fr" }}>
+      {/* tabIndex={-1} makes this a valid skip-link target — without it,
+          a <form> isn't natively focusable and the browser wouldn't
+          actually move keyboard focus here on activation. */}
+      <form id="signin-form" tabIndex={-1} className="dealform" onSubmit={submit} style={{ gridTemplateColumns: "1fr" }}>
         <label>
           Email
           <input name="email" type="email" required autoComplete="email" />

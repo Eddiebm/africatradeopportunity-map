@@ -1,18 +1,24 @@
 import { asc, eq } from "drizzle-orm";
 import { requireUserOrResponse } from "../../../../../lib/auth/current-user";
+import { canParticipateInDispute, resolveDealViewAccess } from "../../../../../lib/auth/deal-access";
 import { getDb } from "../../../../../db";
 import { dealEvents, disputeMessages, disputes } from "../../../../../db/schema";
 import type { SessionUser } from "../../../../../lib/auth/session";
 
 const REVIEWER_ROLES = ["administrator", "verification_analyst"] as const;
 
+// docs/AUDIT.md Priority 1: a legitimate counterparty on the underlying
+// deal — not just whoever opened the case — can now see and post to
+// "parties" audience messages. See lib/auth/deal-access.ts's
+// canParticipateInDispute.
 async function loadDisputeAccess(disputeId: number, user: SessionUser) {
   const db = getDb();
   const [dispute] = await db.select().from(disputes).where(eq(disputes.id, disputeId)).limit(1);
-  if (!dispute) return { dispute: null, isOwner: false, isReviewer: false };
-  const isOwner = dispute.openedByEmail === user.email;
+  if (!dispute) return { dispute: null, canParticipate: false, isReviewer: false };
   const isReviewer = Boolean(user.platformRole && REVIEWER_ROLES.includes(user.platformRole));
-  return { dispute, isOwner, isReviewer };
+  const dealAccess = await resolveDealViewAccess(dispute.dealId, user);
+  const canParticipate = canParticipateInDispute(dispute, dealAccess, user);
+  return { dispute, canParticipate, isReviewer };
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -22,8 +28,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const disputeId = Number((await params).id);
   if (!disputeId) return Response.json({ error: "Dispute not found." }, { status: 404 });
 
-  const { dispute, isOwner, isReviewer } = await loadDisputeAccess(disputeId, user);
-  if (!dispute || (!isOwner && !isReviewer)) return Response.json({ error: "Dispute not found." }, { status: 404 });
+  const { dispute, canParticipate, isReviewer } = await loadDisputeAccess(disputeId, user);
+  if (!dispute || !canParticipate) return Response.json({ error: "Dispute not found." }, { status: 404 });
 
   const rows = await getDb().select().from(disputeMessages).where(eq(disputeMessages.disputeId, disputeId)).orderBy(asc(disputeMessages.id));
   const visible = isReviewer ? rows : rows.filter((m) => m.audience === "parties");
@@ -37,8 +43,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const disputeId = Number((await params).id);
   if (!disputeId) return Response.json({ error: "Dispute not found." }, { status: 404 });
 
-  const { dispute, isOwner, isReviewer } = await loadDisputeAccess(disputeId, user);
-  if (!dispute || (!isOwner && !isReviewer)) return Response.json({ error: "Dispute not found." }, { status: 404 });
+  const { dispute, canParticipate, isReviewer } = await loadDisputeAccess(disputeId, user);
+  if (!dispute || !canParticipate) return Response.json({ error: "Dispute not found." }, { status: 404 });
 
   let body: Record<string, unknown>;
   try {

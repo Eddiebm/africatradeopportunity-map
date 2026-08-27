@@ -43,6 +43,7 @@ export default function Register() {
 
   return (
     <main className="portal">
+      <a className="skip-link" href="#register-form">Skip to registration form</a>
       <header>
         <div className="brand">
           <i>TS</i>
@@ -62,7 +63,7 @@ export default function Register() {
           <h1>Open your trade desk</h1>
         </div>
       </section>
-      <form className="dealform" onSubmit={submit} style={{ gridTemplateColumns: "1fr" }}>
+      <form id="register-form" tabIndex={-1} className="dealform" onSubmit={submit} style={{ gridTemplateColumns: "1fr" }}>
         <label>
           Full name
           <input name="displayName" required autoComplete="name" />
