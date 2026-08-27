@@ -855,7 +855,7 @@ role-authorization for the administrator-only transition, and the
   `counterparties_verified` precondition can't verify them, and silently
   doesn't block on them either. Documented, not hidden.
 
-**Commit:** `pending`
+**Commit:** `d2a2c6f`
 
 ---
 
