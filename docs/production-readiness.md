@@ -1192,7 +1192,205 @@ number) · `build` clean, `/quote` present in the route manifest.
 
 ---
 
-## Priorities 10–13
+## Priority 10 — WhatsApp-ready acquisition
+
+**Status: implemented but not independently verified against a real
+WhatsApp Business API provider** (none exists in this environment — see
+below). Every code path IS real and independently verified against a
+real ConsoleWhatsAppProvider and a real D1-backed test/live database —
+distinguishing these two claims precisely, per the mission's own
+vocabulary, rather than calling the whole priority "verified."
+
+**Explicit stopping condition, stated plainly, not worked around**: no
+WhatsApp Business API credentials (Meta Cloud API, Twilio, or any other
+provider) exist in this environment. Per the mission's own rule
+("missing credentials" is explicit grounds to stop and flag), this
+priority builds the real, working provider-neutral adapter and webhook
+interface — never a fabricated "it works" claim.
+
+**Files changed:** `db/schema.ts` (`whatsappContacts`, `whatsappMessages`,
+`secureLinks`), `drizzle/0016_lame_green_goblin.sql` (migration, all new
+tables — no ALTER COLUMN),
+`worker/env.d.ts` + `.dev.vars.example` (`WHATSAPP_WEBHOOK_SECRET`
+declared), `lib/whatsapp.ts` (new — the provider adapter, mirroring
+`lib/email.ts`'s exact pattern), `lib/secure-links.ts` (new, reusing
+`lib/auth/tokens.ts`'s hash-only-storage convention),
+`lib/whatsapp-notify.ts` (new — the one real caller for milestone
+notifications), `app/api/webhooks/whatsapp/route.ts` (new, inbound),
+`app/api/whatsapp/link/route.ts` (new, authenticated phone linking),
+`app/link/[token]/page.tsx` (new, secure-link landing/handoff),
+`app/api/admin/desk/route.ts` (milestone-verification branch now
+attempts a real WhatsApp notification; GET now includes the WhatsApp
+audit data), `app/admin/page.tsx` + `app/admin.css` (new WhatsApp tab),
+`tests/unit/stubs/next-navigation.ts` (extended, not replaced — the
+redirect stub now carries its destination in the thrown error so a test
+can assert where it redirected to; verified nothing in the repo
+string-matched the old exact message before changing it),
+`tests/unit/whatsapp.test.ts` (new).
+
+**Mission checklist, mapped to what was actually built:**
+- *"Provider-neutral messaging adapter"* — `lib/whatsapp.ts`, exactly
+  mirroring `lib/email.ts`'s existing adapter pattern rather than
+  inventing a second design: an interface, a `ConsoleWhatsAppProvider`
+  that logs instead of delivering, `getWhatsAppProvider()` as the one
+  swap point for a real provider later.
+- *"Webhook interface"* — `app/api/webhooks/whatsapp/route.ts` accepts a
+  NORMALIZED `{from, text, messageId?}` shape, not any one real
+  provider's actual payload format (Meta Cloud API, Twilio, etc. each
+  differ) — a real integration's job is translating its provider's
+  webhook into this shape, which doesn't exist yet because no provider
+  is connected. Checks `WHATSAPP_WEBHOOK_SECRET` when configured
+  (unconfigured here — processes anyway, exactly mirroring
+  `lib/turnstile.ts`'s honest not-verified/not-enforced pattern rather
+  than pretending every request is authentic).
+- *"Inbound quote requests"* — an inbound message's raw text becomes a
+  real `marketRequests` row (`role:"quote_request"`, the SAME table and
+  role Priority 9's `/quote` page uses) with the text stored VERBATIM as
+  `product` — deliberately NOT parsed/guessed into structured
+  product/destination fields (that would be fabricating structured data
+  from an unstructured signal); a human reviewer on the existing admin
+  Listings tab follows up, exactly like a `/quote` submission.
+- *"Structured follow-ups"* — every inbound/outbound message is logged
+  to `whatsappMessages` with `relatedEntityType`/`relatedEntityId`,
+  giving a real thread per deal/contact for a future structured-flow
+  builder to read; the flow logic itself (multi-step guided replies) is
+  not built — a real, stated limitation, not a silent gap.
+- *"Consent tracking"* — `whatsappContacts.consentAt`, a real timestamp,
+  DELIBERATELY SEPARATE from Priority 9's `marketRequests.consentAt`
+  (see `db/schema.ts`'s header: different real-world policies, must not
+  be conflated). Set by an authenticated user explicitly linking a
+  number (`app/api/whatsapp/link/route.ts`) or by a real inbound message
+  (WhatsApp's own real-world "user-initiated message implies session
+  consent" convention).
+- *"Opt-out"* — a real STOP-keyword detector (`looksLikeOptOut`, a fixed
+  keyword match — Priority 6's AI decision boundary: not an NLP
+  judgment call) on the inbound webhook, PLUS a real, safe self-service
+  path: every outbound message gets a unique, single-purpose secure link
+  appended, because a public "type any phone number to opt it out" form
+  would let anyone silence a competitor's notifications — a real
+  security consideration acted on, not just noted.
+- *"Delivery status"* — `whatsappMessages.deliveryStatus` is
+  `"not_configured"` for every send while only `ConsoleWhatsAppProvider`
+  is active — NEVER `"sent"`/`"delivered"`, which would be a fabricated
+  claim.
+- *"Milestone notifications"* — the one real trigger wired end-to-end:
+  `app/api/admin/desk/route.ts`'s milestone-verification branch (a
+  previously notification-free code path — confirmed by inspection, not
+  assumed) now attempts a real WhatsApp send via
+  `lib/whatsapp-notify.ts`, purely additive (wrapped so a notification
+  failure can never break the actual milestone review, which is the
+  real product action).
+- *"Secure expiring links to TradeSafe"* — `lib/secure-links.ts` +
+  `app/link/[token]/page.tsx`. **This does NOT bypass authentication**:
+  resolving a link just proves "a specific notification was actually
+  sent to this number, recently," then hands off via `redirect()` to
+  the SAME auth-gated destination (`/deal/:id`) every other path already
+  uses — Priority 1's real authorization still applies in full, verified
+  live below with a signed-out visitor.
+- *"Never send identity docs/bank details/confidential evidence"* —
+  structurally enforced, not just a comment: `notifyMilestoneEventByWhatsApp`'s
+  function signature only accepts a short `summary` string (e.g.
+  "evidence verified") — there is no parameter through which raw deal
+  content, a document, or evidence could ever reach a WhatsApp message
+  body. Verified live: the real sent message contains the milestone
+  name and deal reference only, plus a link — never the evidence itself.
+- *"Audit history"* — every inbound/outbound message, and every
+  contact's consent/opt-out standing, is queryable by reviewers on the
+  new admin WhatsApp tab, sourced from the exact same real rows the
+  webhook and notification paths write.
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (49 warnings, +4
+over Priority 9's 45, all the same pre-existing `no-html-link-for-pages`
+class already present dozens of times in this codebase, not a new
+category — one genuinely new issue WAS caught and fixed: an unescaped
+apostrophe in a JSX text node, `react/no-unescaped-entities`, the one
+actual lint ERROR hit and fixed before this section was written) ·
+**177/177 tests** (27 new: consent/opt-out state machine including
+pre-emptive opt-out of a never-contacted number, send refusal for both
+no-consent and opted-out with the real reason recorded, honest
+`not_configured` delivery status, the opt-out keyword matcher's real
+false-positive guard ("please stop by the office" ≠ opt-out), secure-link
+create/resolve/expire/not-found/multi-open-doesn't-invalidate, the raw
+token never being recoverable from the stored row, the `/link/:token`
+Server Component's real redirect target AND its real opt-out side
+effect, both WhatsApp routes' auth/validation, the inbound webhook's
+real STOP handling and real quote-request creation with verbatim (never
+parsed/guessed) text, and the full milestone→WhatsApp integration in
+both directions — a deal owner WITH and WITHOUT a linked number) ·
+`build` clean, all three new routes present in the route manifest.
+
+**Live browser + attack verification, not just unit tests:**
+- A real trader links a real E.164 number via the authenticated API;
+  confirmed via direct D1 read: a genuine `consentAt`, correct
+  `linkedEmail`, no `optOutAt`.
+- **Attack**: linking a number with no session → 401. **Attack/validation**:
+  a non-E.164 phone number → 400.
+- A real deal + milestone created through the real UI; an administrator
+  verifies the milestone through the real admin desk → a REAL outbound
+  `whatsappMessages` row is created, `deliveryStatus:"not_configured"`
+  (never fabricated as delivered), containing the deal reference and
+  milestone name **and never the product name or any deal detail beyond
+  those two identifiers** — confirmed by directly asserting the raw
+  product text is ABSENT from the message body.
+- The real secure link extracted from that real message body, followed
+  by the real, signed-in deal owner in a real browser → lands on the
+  real `/deal/:id` page.
+- **Attack**: the SAME real link followed by a signed-out visitor → does
+  NOT reveal deal content — redirected to `/login`, exactly Priority 1's
+  existing behavior for `/deal/:id` directly, proving the secure link
+  really is a handoff, not a second, weaker authentication path.
+- An invalid/nonexistent token in the URL → an honest "not valid"
+  message, no crash, no redirect.
+- A real inbound webhook call with ordinary text → visible, verbatim, on
+  the existing admin Listings tab after a real reload — no separate
+  review surface needed, it reuses Priority 9's own queue.
+- A real inbound STOP message via the webhook → the sender's number is
+  genuinely opted out, confirmed by direct D1 read — and a subsequent
+  milestone-review notification attempt to that number is refused
+  (`reason:"opted_out"`) without breaking the milestone review itself
+  (still returns 200).
+- The admin WhatsApp tab, loaded fresh: zero console errors, shows the
+  real contact and the real message body.
+- **Accessibility tree** (a real Playwright snapshot): the `/link/:token`
+  landing page's heading and every link have real, non-empty accessible
+  names; keyboard Tab reaches a real focusable element first.
+- Mobile viewport (390×844): no horizontal overflow on the secure-link
+  landing page.
+
+**Remaining risks, explicitly deferred, and the honest reason for
+"implemented but not independently verified":**
+- **No real WhatsApp Business API provider connected** — this is the
+  headline limitation, stated once here and not repeated as a caveat on
+  every bullet above: nothing in this priority has been exercised
+  against Meta's Cloud API, Twilio, or any other real provider, because
+  none is available in this environment. Connecting one means
+  implementing a real `WhatsAppProvider` (swap point already built),
+  wiring that real provider's own webhook payload shape into the
+  existing normalized `{from, text}` interface, and setting
+  `WHATSAPP_WEBHOOK_SECRET` for real signature verification.
+- No structured multi-step follow-up FLOW logic (e.g., "reply 1 for
+  buying, 2 for selling") — the message log/thread data model supports
+  building one later; the conversational logic itself is not built.
+- No phone-number verification (an OTP/confirmation step) when a user
+  links a number via `app/api/whatsapp/link/route.ts` — that also
+  requires a real provider to send a real verification code through.
+  Documented as a real gap, not hidden.
+- The milestone-notification trigger is the ONE wired event, matching
+  the mission's explicit naming — deal-stage transitions, dispute
+  updates, and other notification-worthy events are not wired to
+  WhatsApp yet (they could reuse the same `sendWhatsAppMessage`
+  primitive; not done in this priority to keep the change focused).
+- `APP_ORIGIN` (`https://tradesafe.africa`) is a documented placeholder
+  — no production domain is provisioned in this environment (see
+  `docs/DEPLOYMENT.md`); a real deploy must set this from the actual
+  origin or every secure link generated will point at a non-existent
+  domain.
+
+**Commit:** `pending`
+
+---
+
+## Priorities 11–13
 
 Not started. Worked next, one focused commit (or a few) per priority,
 each getting its own dated section here — never marked verified without

@@ -25,11 +25,21 @@ interface Env {
    * only enforced as a hard rejection in production builds).
    */
   TURNSTILE_SECRET_KEY: string;
+  /**
+   * Priority 10 (docs/production-readiness.md): a shared secret the
+   * inbound WhatsApp webhook (app/api/webhooks/whatsapp/route.ts) checks
+   * against a request header before trusting the payload. Unset in this
+   * environment — no real WhatsApp Business API provider is connected,
+   * so there is no real webhook secret to configure yet. See
+   * lib/whatsapp.ts's header for the full stopping-condition note.
+   */
+  WHATSAPP_WEBHOOK_SECRET: string;
 }
 
 declare namespace Cloudflare {
   interface Env {
     SESSION_SECRET: string;
     TURNSTILE_SECRET_KEY: string;
+    WHATSAPP_WEBHOOK_SECRET: string;
   }
 }

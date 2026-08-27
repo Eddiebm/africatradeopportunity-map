@@ -17,3 +17,11 @@ SESSION_SECRET=replace-with-a-random-32-byte-base64-value
 # enforced as a hard rejection outside of production builds — see
 # lib/turnstile.ts's turnstileEnforced() for the exact fail-open/closed rule.
 TURNSTILE_SECRET_KEY=
+
+# Priority 10: shared secret the inbound WhatsApp webhook checks against a
+# request header before trusting the payload. No real WhatsApp Business
+# API provider is connected in this environment — see lib/whatsapp.ts's
+# header for the full stopping-condition note. Leave unset locally; the
+# webhook still processes requests (documented, not silently faked as
+# "verified") but logs plainly that no secret was configured.
+WHATSAPP_WEBHOOK_SECRET=

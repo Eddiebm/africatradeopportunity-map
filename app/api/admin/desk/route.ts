@@ -1,8 +1,10 @@
 import { desc, eq } from "drizzle-orm";
 import { requirePlatformRoleOrResponse } from "../../../../lib/auth/current-user";
 import { attemptDealTransition } from "../../../../lib/deal-workflow";
+import { notifyMilestoneEventByWhatsApp } from "../../../../lib/whatsapp-notify";
+import { logServerError, newCorrelationId } from "../../../../lib/observability";
 import { getDb } from "../../../../db";
-import { adminAuditEvents, dealDocuments, deals, disputeEvents, disputeMessages, disputes, introductions, marketRequests, matchCandidates, milestones, organizations, verificationChecks } from "../../../../db/schema";
+import { adminAuditEvents, dealDocuments, deals, disputeEvents, disputeMessages, disputes, introductions, marketRequests, matchCandidates, milestones, organizations, verificationChecks, whatsappContacts, whatsappMessages } from "../../../../db/schema";
 
 const REVIEWER_ROLES = ["administrator", "verification_analyst"] as const;
 const DISPUTE_PRIORITIES = ["normal", "high", "urgent"] as const;
@@ -35,7 +37,7 @@ export async function GET(request: Request) {
   const auth = await requirePlatformRoleOrResponse(request, [...REVIEWER_ROLES]);
   if (auth instanceof Response) return auth;
   const db = getDb();
-  const [dealRows, requestRows, checks, documents, matches, organizationRows, introductionRows, milestoneRows, disputeRows, disputeMessageRows] = await Promise.all([
+  const [dealRows, requestRows, checks, documents, matches, organizationRows, introductionRows, milestoneRows, disputeRows, disputeMessageRows, whatsappMessageRows, whatsappContactRows] = await Promise.all([
     db.select().from(deals).orderBy(desc(deals.id)).limit(100),
     db.select().from(marketRequests).orderBy(desc(marketRequests.id)).limit(100),
     db.select().from(verificationChecks).orderBy(desc(verificationChecks.id)).limit(300),
@@ -50,8 +52,13 @@ export async function GET(request: Request) {
     // Reviewers see the full thread, including internal-audience notes that
     // the dispute opener's own view (app/disputes/page.tsx) never gets.
     db.select().from(disputeMessages).orderBy(desc(disputeMessages.id)).limit(500),
+    // Priority 10: the real audit history the mission asks for — every
+    // inbound and outbound WhatsApp message this platform has any record
+    // of, whether or not a real provider was ever connected.
+    db.select().from(whatsappMessages).orderBy(desc(whatsappMessages.id)).limit(300),
+    db.select().from(whatsappContacts).orderBy(desc(whatsappContacts.id)).limit(300),
   ]);
-  return Response.json({ deals: dealRows, requests: requestRows, checks, documents, matches, organizations: organizationRows, introductions: introductionRows, milestones: milestoneRows, disputes: disputeRows, disputeMessages: disputeMessageRows });
+  return Response.json({ deals: dealRows, requests: requestRows, checks, documents, matches, organizations: organizationRows, introductions: introductionRows, milestones: milestoneRows, disputes: disputeRows, disputeMessages: disputeMessageRows, whatsappMessages: whatsappMessageRows, whatsappContacts: whatsappContactRows });
 }
 
 export async function PATCH(request: Request) {
@@ -188,6 +195,25 @@ export async function PATCH(request: Request) {
     if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
     await db.update(milestones).set({ evidenceStatus: status }).where(eq(milestones.id, numericId));
     await db.insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "milestone", entityId: numericId, fromStatus: row.evidenceStatus, toStatus: status, reason });
+    // Priority 10 (docs/production-readiness.md): "milestone notifications"
+    // — the first and only real trigger wired to lib/whatsapp-notify.ts.
+    // Purely additive: no-ops silently (returns {sent:false}) for every
+    // deal owner who hasn't linked an opted-in WhatsApp number, which is
+    // every deal owner in this environment today (no real provider is
+    // connected either — see lib/whatsapp.ts). Never blocks or fails the
+    // actual milestone review if the notification attempt has any issue.
+    if (status === "verified" || status === "missing") {
+      const [deal] = await db.select().from(deals).where(eq(deals.id, row.dealId)).limit(1);
+      if (deal) {
+        await notifyMilestoneEventByWhatsApp({
+          dealId: deal.id,
+          dealReference: deal.reference,
+          milestoneName: row.name,
+          summary: status === "verified" ? "evidence verified" : "evidence sent back — resubmission needed",
+          ownerEmail: deal.ownerEmail,
+        }).catch((error) => logServerError(newCorrelationId(), { method: "PATCH", pathname: "/api/admin/desk#milestone-notify" }, error));
+      }
+    }
   } else if (body.entity === "dispute") {
     const [row] = await db.select().from(disputes).where(eq(disputes.id, numericId)).limit(1);
     if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });

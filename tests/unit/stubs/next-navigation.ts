@@ -9,7 +9,16 @@
 // server-rendering context, which Miniflare's bare test worker is not. If
 // a test ever calls the Server Component guards and hits this, it'll throw
 // loudly (not silently redirect) so a real regression is still caught.
-export function redirect(...args: unknown[]): never {
-  void args;
-  throw new Error("next/navigation redirect() stub called — this test should not exercise Server Component guards.");
+//
+// Priority 10 (docs/production-readiness.md): app/link/[token]/page.tsx is
+// a real Server Component that DOES call redirect() as its actual,
+// intended behavior (hand off to the real auth-gated destination page —
+// see that file's header). The thrown error's message carries the
+// destination (`NEXT_REDIRECT:<url>`) specifically so a test can assert on
+// where it redirected to, same "throw loudly, never silently swallow"
+// contract as before — nothing in this repo string-matches the old exact
+// message (checked before changing it).
+export function redirect(url?: string, ...rest: unknown[]): never {
+  void rest;
+  throw new Error(`NEXT_REDIRECT:${url ?? ""}`);
 }

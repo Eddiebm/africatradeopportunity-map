@@ -551,6 +551,81 @@ export const notifications = sqliteTable("notifications", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+// ---------------------------------------------------------------------------
+// Priority 10 (docs/production-readiness.md): "WhatsApp-ready acquisition —
+// provider-neutral messaging adapter + webhook interface. Don't hardcode a
+// provider or claim WhatsApp works without real credentials/verification."
+//
+// No WhatsApp Business API credentials exist in this environment (a real,
+// explicit stopping condition per the mission's own rules — see
+// lib/whatsapp.ts's header). Everything below is a REAL, working code path
+// against a ConsoleWhatsAppProvider that logs instead of delivering — the
+// exact pattern lib/email.ts already established for outbound email, reused
+// here rather than reinvented.
+// ---------------------------------------------------------------------------
+
+// A phone number's standing with this platform — separate from
+// marketRequests.consentAt (Priority 9's general "may contact me" consent)
+// because WhatsApp Business Platform has its own, distinct opt-in/opt-out
+// requirements (a business may only message a user who has opted in, and
+// must honor STOP-style opt-outs) — conflating the two would misrepresent
+// what was actually agreed to under which policy.
+export const whatsappContacts = sqliteTable("whatsapp_contacts", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  phoneNumber: text("phone_number").notNull().unique(), // E.164, e.g. "+233..."
+  linkedEmail: text("linked_email").notNull().default(""), // "" = not linked to a known account yet
+  consentAt: text("consent_at"),
+  optOutAt: text("opt_out_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const WHATSAPP_MESSAGE_DIRECTIONS = ["inbound", "outbound"] as const;
+export type WhatsAppMessageDirection = (typeof WHATSAPP_MESSAGE_DIRECTIONS)[number];
+
+// The full audit history the mission asks for — every inbound message this
+// platform ever received and every outbound message it ever attempted,
+// regardless of whether a real provider was connected. deliveryStatus
+// stays honest: "not_configured" (no real provider), not a fabricated
+// "sent"/"delivered", when nothing was actually connected.
+export const whatsappMessages = sqliteTable("whatsapp_messages", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  phoneNumber: text("phone_number").notNull(),
+  direction: text("direction").notNull(),
+  messageType: text("message_type").notNull().default("text"),
+  body: text("body").notNull().default(""),
+  relatedEntityType: text("related_entity_type").notNull().default(""),
+  relatedEntityId: integer("related_entity_id"),
+  providerName: text("provider_name").notNull().default(""),
+  providerMessageId: text("provider_message_id").notNull().default(""),
+  deliveryStatus: text("delivery_status").notNull().default("queued"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+// "Never send identity docs/bank details/confidential evidence/sensitive
+// files through WhatsApp — send authenticated expiring links instead."
+// Mirrors emailVerificationTokens/passwordResetTokens' exact convention
+// (tokenHash only — the raw token lives in the message, never the
+// database) rather than inventing a second token pattern. Resolving a
+// link does NOT itself bypass this platform's real authentication — see
+// app/link/[token]/page.tsx: it validates the token, then hands the
+// visitor to the SAME auth-gated destination page every other path
+// already uses (Priority 1), so a leaked/guessed link can prove "this was
+// generated for a specific notification" but can never skip a login check.
+export const secureLinks = sqliteTable("secure_links", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  tokenHash: text("token_hash").notNull().unique(),
+  purpose: text("purpose").notNull(),
+  entityType: text("entity_type").notNull(),
+  entityId: integer("entity_id").notNull(),
+  createdForPhone: text("created_for_phone").notNull().default(""),
+  expiresAt: text("expires_at").notNull(),
+  // Informational only (does not invalidate the link — a legitimate
+  // recipient clicking the same link twice should not see "expired").
+  firstOpenedAt: text("first_opened_at"),
+  openCount: integer("open_count").notNull().default(0),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 // Priority 2 (docs/production-readiness.md): "Audit logging for sensitive
 // actions." adminAuditEvents covers admin-desk decisions,
 // documentAuditEvents/dealEvents/disputeEvents cover deal activity — but
