@@ -142,8 +142,7 @@ mocked):**
 - Full screen-reader (not just keyboard) verification across the app —
   Priority 4.
 
-**Commit:** _(pending — will be filled in immediately after `git commit`,
-before push, per the loop's own step 10/11 ordering)_.
+**Commit:** `67de635`
 
 ---
 
