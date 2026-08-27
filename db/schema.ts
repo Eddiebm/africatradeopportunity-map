@@ -215,6 +215,15 @@ export const verificationChecks = sqliteTable("verification_checks", {
   reviewerEmail: text("reviewer_email").notNull().default(""),
   notes: text("notes").notNull().default(""),
   checkedAt: text("checked_at"),
+  // Which uploaded file was actually reviewed for this check. Nullable —
+  // most checks won't have one until a trader attaches evidence (see
+  // app/api/deals/[id]/checks/[checkId]/route.ts). References documentFiles
+  // below, so this column has to come after that table is declared.
+  evidenceFileId: integer("evidence_file_id").references(() => documentFiles.id),
+  // When a "verified" result stops counting as current. Nullable — unset
+  // until an admin actually verifies the check (app/api/admin/desk/route.ts).
+  // Not wired up by anything yet in this pass; see docs/AUDIT.md follow-ups.
+  expiresAt: text("expires_at"),
 });
 
 export const dealDocuments = sqliteTable("deal_documents", {

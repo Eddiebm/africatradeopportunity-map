@@ -43,6 +43,13 @@
       "when": 1787785466973,
       "tag": "0005_sparkling_speed",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787791235390,
+      "tag": "0006_perpetual_spot",
+      "breakpoints": true
     }
   ]
 }
