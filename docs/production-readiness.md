@@ -718,7 +718,7 @@ coverage on all three routes) · `build` clean.
   AI boundary; if a future priority wants an enforced gate, that's a
   distinct, larger product decision this priority does not make.
 
-**Commit:** `pending`
+**Commit:** `b2f5a4e`
 
 ---
 
