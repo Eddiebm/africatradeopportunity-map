@@ -6,6 +6,7 @@ import { dealCosts, dealDocuments, dealEvents, dealParties, documentFiles, miles
 import CheckEvidencePicker from "../../components/CheckEvidencePicker";
 import DealPartiesAndReferrals from "../../components/DealPartiesAndReferrals";
 import DocumentUploadRow from "../../components/DocumentUploadRow";
+import LandedCostBreakdown from "../../components/LandedCostBreakdown";
 import MilestoneEvidenceButton from "../../components/MilestoneEvidenceButton";
 import QuoteActions from "../../components/QuoteActions";
 import QuoteRequestForm from "../../components/QuoteRequestForm";
@@ -75,6 +76,10 @@ export default async function DealRoom({ params }: { params: Promise<{ id: strin
     <section className="roomhead"><div><p>{deal.stage.toUpperCase()}</p><h1>{deal.product}</h1><span>{deal.origin} → {deal.destination} · {deal.quantity || "—"} {deal.unit}</span></div><aside className={score < 50 ? "danger" : score < 88 ? "warning" : "ready"}><b>{score}</b><span>/100 evidence score</span></aside></section>
     <section className="roommetrics"><article><small>{quoteLanded ? "QUOTE-BACKED LANDED COST" : "ESTIMATED LANDED COST"}</small><b>{formatCurrency(landed, deal.currency)}</b></article><article><small>REPORTED SALE VALUE</small><b>{formatCurrency(cost?.expectedRevenue || 0, deal.currency)}</b></article><article><small>{quoteLanded ? "QUOTE-BACKED PROFIT" : "ESTIMATED PROFIT"}</small><b className={profit >= 0 ? "positive" : "negative"}>{formatCurrency(profit, deal.currency)}</b></article><article><small>DECISION</small><b>{profit > 0 && score === 100 ? "REVIEW TO PROCEED" : "HOLD"}</b></article></section>
     <section className="resolutionnote"><b>Commercial status:</b> {quoteLanded ? "These figures are backed by an accepted, unexpired quote from the counterparty organization — still not a binding contract without one." : "These figures are user-reported estimates, not transaction-ready prices."} Profit becomes quote-backed only after buyer and supplier quotes are accepted and unexpired. <a href="/disputes">Open the resolution center</a>.</section>
+    {/* Priority 12 (docs/production-readiness.md): the itemized, sourced
+        breakdown behind the summary figures above — never a replacement
+        for them, an additional layer of honesty on top. */}
+    <section className="roomgrid"><article style={{ gridColumn: "1/3" }}><LandedCostBreakdown dealId={id} currency={deal.currency} isOwner={isOwner} /></article></section>
     <section className="roomgrid"><article><div className="roomtitle"><small>VERIFICATION</small><b>{passed}/{checks.length} verified</b></div>{checks.map((check) => {const evidenceFile=check.evidenceFileId?files.find(f=>f.id===check.evidenceFileId):undefined;return <div className="task" key={check.id}><i>{check.status === "verified" ? "✓" : "—"}</i><span><b>{check.checkType.replaceAll("_", " ")}</b><small>{check.status}{evidenceFile?` · ${evidenceFile.originalName}`:""}</small></span>{!evidenceFile && isOwner && <CheckEvidencePicker dealId={id} checkId={check.id} files={files} />}</div>})}</article>
       <article><div className="roomtitle"><small>SECURE DOCUMENT REGISTER</small><b>{documents.filter(x => x.status === "approved").length}/{documents.length} approved</b></div>{documents.map((doc) => {const file=files.filter(x=>x.dealDocumentId===doc.id).at(-1);return <DocumentUploadRow key={doc.id} dealId={id} documentId={doc.id} name={doc.documentType} status={doc.status} fileId={file?.id} fileName={file?.originalName} canUpload={isOwner}/>})}</article></section>
     <section className="roomgrid">

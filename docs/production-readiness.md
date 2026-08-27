@@ -1574,9 +1574,144 @@ and end-to-end registration/quote-request attribution integration) ·
 
 ---
 
-## Priorities 12–13
+## Priority 12 — Landed-cost accuracy
 
-Not started. Worked next, one focused commit (or a few) per priority,
-each getting its own dated section here — never marked verified without
-the same real browser + attack-test + accessibility rigor applied above,
-and never batched into a single unverified sweep.
+**Status: verified.**
+
+**Files changed:** `db/schema.ts` (`landedCostEntries` — new, additive),
+`drizzle/0018_dry_wallflower.sql` (migration, one new table),
+`lib/landed-cost.ts` (new — recording, breakdown computation, deal-
+creation seeding), `app/api/deals/[id]/landed-cost/route.ts` (new),
+`app/api/deals/route.ts` (wires seeding into deal creation),
+`app/components/LandedCostBreakdown.tsx` (new),
+`app/deal/[id]/page.tsx` (renders it), `tests/unit/landed-cost.test.ts`
+(new).
+
+**What this adds, precisely, on top of what already existed**: Phase 3's
+`dealCosts` (one flat number per component) and `quotes` (a real,
+counterparty-sourced single-point breakdown) already existed and are
+UNCHANGED — this priority doesn't replace either, it adds the itemized,
+sourced, ranged layer the mission specifically asks for that neither of
+those provided: low/expected/high estimates, confidence, source +
+source date, explicit unknown/excluded flagging, and — the one
+genuinely new capability — real actuals recorded after delivery with a
+real computed variance.
+
+**"Calculate goods+transport+insurance+duties+taxes+brokerage+
+inspection+financing+TradeSafe fees" — all nine categories now
+genuinely exist**, including three the platform never tracked at all
+before this priority (`brokerage`, `tradesafe_fees`, and — found by
+inspection before writing anything — `insurance`/`inspection` were
+schema columns on `dealCosts` that the actual `/deal/new` form has
+never had inputs for, always silently defaulting to 0).
+
+**"Never fabricate precision" enforced in the seeding logic itself, not
+just in the display**: `insurance` and `inspection` are seeded as
+EXPLICITLY EXCLUDED (`isExcluded:true`, with a real stated reason) when
+the request genuinely didn't supply a value — never as $0, which would
+misreport "not asked" as "known to cost nothing." `low`/`high` stay
+`null` on every seeded estimate, because a single trader-typed number is
+not a range; fabricating one by copying the point value into both would
+manufacture a false confidence interval. `tradesafe_fees` is seeded at a
+real, checked fact (this codebase currently has no fee/billing logic
+anywhere — confirmed by inspection, not assumed) at `high` confidence,
+with the assumption stated explicitly rather than silently implied
+permanent.
+
+**"Present low/expected/high ... unknown/excluded costs"** —
+`getLandedCostBreakdown()`'s totals are honestly `null` for `low`/`high`
+the moment even ONE contributing component lacks a real range (verified:
+summing a partial set of low bounds and calling it "the low total" would
+itself be a fabricated precision claim) — excluded components are
+listed separately, never silently dropped from the response and never
+folded into the totals.
+
+**"After delivery, record actuals and calculate variance"** — a real,
+owner-only write path (`phase:"actual"`, REQUIRES a real `source` —
+"a document to check it against," not a bare number) computes
+`variance = actual − estimate` per component. Verified live end-to-end:
+a real deal's real "goods" estimate ($10,000), a real actual recorded
+through the real UI form ($10,450, sourced to a specific invoice
+number) → a real +$450 variance rendered on the page.
+
+**"Never show ... unsupported profit claims, guaranteed savings/
+profit"** — the variance is displayed as a plain signed figure "vs.
+estimate," never phrased as savings or profit anywhere in
+`LandedCostBreakdown.tsx`; verified with a live regex check against the
+rendered page text for exactly that language, and a repo-wide sweep
+(`grep -rniE "guaranteed (profit|savings|return)|100% (profit|accurate)|risk-free"`)
+found none anywhere in the app, not only in the new code.
+
+**Append-only, same convention as corridor_templates/
+organization_verifications/exceptions**: a re-estimate is a NEW row for
+the same `(dealId, componentType, phase)`, never an UPDATE — "latest
+wins" for what counts as current, full history preserved for what was
+assumed, by whom, and when, before it changed. Verified: two estimate
+rows for the same component both persist in D1; the breakdown correctly
+surfaces only the newer one.
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (53 warnings, +1
+over Priority 11's 52, the same pre-existing warning class) ·
+**210/210 tests** (12 new: seeding never fabricates a range, genuinely
+uncollected components excluded not zeroed, the honest
+`tradesafe_fees` fact, a real range computing correctly into totals, a
+partial range honestly nulling the total, real variance computation, a
+re-estimate preserving history, and the route's real deal-access
+gating, range sanity checks, and actual-requires-a-source rule) ·
+`build` clean, the new route present in the route manifest.
+
+**Live browser + attack verification, not just unit tests:**
+- A real deal created through the real `/deal/new` form with real cost
+  figures → real, sourced `landed_cost_entries` rows confirmed via
+  direct D1 read for every one of the nine component categories; the
+  `goods` entry carries the exact `supplierCost` the trader typed;
+  `insurance` is confirmed EXCLUDED with the honest reason text, not a
+  fabricated $0; `tradesafe_fees` confirmed at the honest stated fact.
+- The deal page renders the real breakdown with zero console errors,
+  showing the real estimate, a real confidence rating, and a real
+  "NOT YET ESTIMATED" section listing the genuinely excluded
+  components.
+- **Attack**: an unrelated signed-in user (no relationship to this
+  deal) → `GET` the breakdown → 404 (not 403 — existence not revealed,
+  matching Priority 1's convention); the same user attempting to
+  `POST` a cost entry → 404.
+- **Attack**: a direct API call with a nonsense range
+  (`lowAmount > expectedAmount` and `highAmount < expectedAmount`) →
+  400, naming exactly which bound was invalid.
+- The real owner refines an estimate with a real range via the API,
+  then records a real actual through the real UI form (component,
+  amount, a real invoice-number source) → confirmed via direct D1 read;
+  the page reload shows a real Variance figure.
+- **Attack**: recording an actual with no source → 400.
+- **Accessibility tree** (a real Playwright snapshot): every form
+  control on the deal page (including the new "record actual" form)
+  has a real, non-empty accessible name. Mobile viewport (390×844): no
+  horizontal overflow on the deal room with the new section added.
+
+**Remaining risks, explicitly deferred:**
+- No UI path (only a direct API call, verified working) for a reviewer
+  to refine an estimate's low/high range or confidence — the live UI
+  form only exposes recording an actual; adding a full estimate-editing
+  UI was judged lower priority than the actuals/variance path the
+  mission specifically calls out, and is a real, stated gap, not
+  hidden.
+- Variance is computed only per-component; no rolled-up "total actual
+  vs. total estimate" percentage or chart — the raw numbers are all
+  present in the API response for a future dashboard (Priority 13's
+  natural territory) to compute one honestly, not fabricated here in
+  the meantime.
+- `dealCosts.sourceStatus` (a schema column that predates this
+  priority) remains effectively unused — noticed during inspection, not
+  wired into this priority's model since it would mean touching Phase
+  1–4's existing, working `dealCosts` write path; flagged as a
+  cleanup opportunity, not addressed here.
+
+**Commit:** `pending`
+
+---
+
+## Priority 13
+
+Not started. Worked next — the final priority in the mission's list.
+Never marked verified without the same real browser + attack-test +
+accessibility rigor applied above.

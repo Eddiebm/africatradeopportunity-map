@@ -1033,3 +1033,57 @@ export const commissionRecords = sqliteTable("commission_records", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+// ---------------------------------------------------------------------------
+// Priority 12 (docs/production-readiness.md): "Landed-cost accuracy — per
+// cost component: amount, currency, source, retrieval date, verified/
+// estimated status, assumptions, confidence, responsible party ... low/
+// expected/high estimates, unknown/excluded costs, confidence, source
+// dates ... after delivery, record actuals and calculate variance ...
+// Never show fabricated precision, unsupported profit claims, guaranteed
+// savings/profit."
+//
+// `dealCosts` (see above) already existed — one flat number per component,
+// no range, no confidence, no source, no actuals. This table doesn't
+// replace it (dealCosts stays the deal-creation form's own record, used
+// elsewhere unchanged); it's a genuinely richer, itemized layer on top,
+// append-only like corridor_templates/organization_verifications above
+// (same reason: an editable "current estimate" would erase the very
+// history a real accuracy claim needs — what was assumed, by whom, and
+// when, before comparing it to what actually happened).
+export const LANDED_COST_COMPONENT_TYPES = [
+  "goods", "transport", "insurance", "duties_taxes", "brokerage",
+  "inspection", "financing", "tradesafe_fees", "other",
+] as const;
+export type LandedCostComponentType = (typeof LANDED_COST_COMPONENT_TYPES)[number];
+
+export const LANDED_COST_PHASES = ["estimate", "actual"] as const;
+export type LandedCostPhase = (typeof LANDED_COST_PHASES)[number];
+
+export const LANDED_COST_CONFIDENCE = ["low", "medium", "high"] as const;
+export type LandedCostConfidence = (typeof LANDED_COST_CONFIDENCE)[number];
+
+export const landedCostEntries = sqliteTable("landed_cost_entries", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  dealId: integer("deal_id").notNull().references(() => deals.id),
+  componentType: text("component_type").notNull(),
+  phase: text("phase").notNull(), // estimate | actual
+  // Nullable on purpose — a single reported number is NOT a range; low/high
+  // stay null until someone actually supplies a real range, rather than
+  // fabricating one by copying expectedAmount into both (see
+  // lib/landed-cost.ts's seeding comment for where this matters most).
+  lowAmount: real("low_amount"),
+  expectedAmount: real("expected_amount").notNull(),
+  highAmount: real("high_amount"),
+  currency: text("currency").notNull().default("USD"),
+  source: text("source").notNull().default(""),
+  sourceDate: text("source_date"),
+  confidence: text("confidence").notNull().default("low"),
+  assumptions: text("assumptions").notNull().default(""),
+  // "Present unknown/excluded costs" — true means this component is
+  // EXPLICITLY known-not-yet-quantified and is excluded from totals,
+  // surfaced separately (never silently dropped, never counted as $0).
+  isExcluded: integer("is_excluded", { mode: "boolean" }).notNull().default(false),
+  recordedByEmail: text("recorded_by_email").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});

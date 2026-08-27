@@ -3,6 +3,7 @@ import { requireUserOrResponse, type SessionUser } from "../../../lib/auth/curre
 import { withIdempotency } from "../../../lib/idempotency";
 import { corridorKeyFor, getCurrentTemplate } from "../../../lib/corridor-templates";
 import { DEAL_STAGES } from "../../../lib/deal-workflow";
+import { seedLandedCostFromDealIntake } from "../../../lib/landed-cost";
 import { getDb } from "../../../db";
 import { dealCosts, dealDocuments, dealEvents, deals, milestones, verificationChecks } from "../../../db/schema";
 
@@ -82,6 +83,27 @@ async function createDeal(req: Request, user: SessionUser) {
       borderTaxes: Number(body.borderTaxes || 0),
       financeFx: Number(body.financeFx || 0),
       lossPercent: Number(body.lossPercent || 0),
+    });
+    // Priority 12 (docs/production-readiness.md): the itemized, sourced
+    // layer on top of the flat dealCosts row above — see
+    // lib/landed-cost.ts's seeding comment for exactly what's honest to
+    // claim about each component. insurance/inspection genuinely aren't
+    // collected by the current /deal/new form (confirmed by inspection),
+    // but this checks the ACTUAL request body, not the current UI
+    // version — a future/direct caller that does supply them is
+    // recorded as a real estimate, not silently forced excluded.
+    await seedLandedCostFromDealIntake({
+      dealId: deal.id,
+      currency: String(body.currency || "USD"),
+      recordedByEmail: user.email,
+      supplierCost: Number(body.supplierCost || 0),
+      freight: Number(body.freight || 0),
+      borderTaxes: Number(body.borderTaxes || 0),
+      financeFx: Number(body.financeFx || 0),
+      insuranceCollected: body.insurance != null && String(body.insurance) !== "",
+      inspectionCollected: body.inspection != null && String(body.inspection) !== "",
+      insurance: Number(body.insurance || 0),
+      inspection: Number(body.inspection || 0),
     });
     await db.insert(verificationChecks).values(checks.map((checkType) => ({ dealId: deal.id, checkType })));
     await db.insert(dealDocuments).values(documents.map((documentType) => ({ dealId: deal.id, documentType })));
