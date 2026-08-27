@@ -1,0 +1,26 @@
+.quotepage{min-height:100vh;background:#f4f1e8;color:#18372d}
+.quotepage header{display:flex;justify-content:space-between;align-items:center;padding:16px 5vw;border-bottom:1px solid #ccd2c7;background:#f9f7f0}
+.quotepage header a{font-size:10px;color:#18372d;text-decoration:none;text-transform:uppercase}
+.quotehero{padding:36px 5vw 8px;max-width:640px}
+.quotehero p{font-size:9px;letter-spacing:.16em;color:#ad7721;margin:0 0 8px}
+.quotehero h1{font:30px/1.3 Georgia;margin:0 0 10px}
+.quotehero span{font-size:12px;color:#3f5148;line-height:1.6;display:block}
+.quoteform{margin:24px 5vw 60px;max-width:640px;background:#fff;border:1px solid #ccd2c7;padding:22px;display:grid;grid-template-columns:1fr;gap:16px}
+.quoteform label{font-size:9px;text-transform:uppercase;letter-spacing:.08em;display:block}
+.quoteform input,.quoteform select,.quoteform textarea{display:block;width:100%;box-sizing:border-box;margin-top:7px;border:1px solid #bcc6bd;background:#faf9f4;padding:13px;font-size:14px;color:#18372d}
+.quoteform textarea{resize:vertical;min-height:64px}
+.quoterow{display:grid;grid-template-columns:1fr;gap:12px}
+.quoteform .consent{display:flex;align-items:flex-start;gap:10px;font-size:11px;text-transform:none;letter-spacing:normal;line-height:1.5}
+.quoteform .consent input{width:auto;margin:2px 0 0}
+.quoteform button{background:#176643;color:#fff;border:0;padding:16px;font-weight:bold;font-size:14px}
+.quoteform button:disabled{background:#8ea79b}
+.quoteform>strong{font-size:11px}
+.quoteconfirm{margin:24px 5vw 60px;max-width:640px;background:#dceade;border:1px solid #9fc3ab;padding:26px}
+.quoteconfirm h2{font:22px Georgia;margin:0 0 10px}
+.quoteconfirm p{font-size:12px;line-height:1.7;margin:0 0 14px}
+.quoteconfirm a{display:inline-block;background:#176643;color:#fff;text-decoration:none;padding:12px 18px;font-size:11px;font-weight:bold;margin-right:10px}
+.quoteconfirm .secondary{background:transparent;color:#176643;border:1px solid #176643}
+.quotenote2{font-size:10px;color:#66736d;margin:6px 0 0}
+@media(min-width:640px){
+  .quoterow{grid-template-columns:1fr 1fr}
+}

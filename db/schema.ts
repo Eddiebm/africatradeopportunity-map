@@ -146,6 +146,30 @@ export const marketRequests = sqliteTable("market_requests", {
   contact: text("contact").notNull(),
   status: text("status").notNull().default("pending_verification"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  // Priority 9 (docs/production-readiness.md): the low-friction quote
+  // request flow (app/quote/page.tsx, role:"quote_request") needs a few
+  // fields the original classifieds-style listing above never collected.
+  // All nullable/defaulted — every pre-existing row and every OTHER role
+  // ("wanted"/"for_sale"/"freight_available"/"protection_request") simply
+  // never sets them, exactly like `volume`/`targetPrice` already work for
+  // rows that predate those columns.
+  quantity: real("quantity"),
+  unit: text("unit").notNull().default(""),
+  productSpec: text("product_spec").notNull().default(""),
+  requiredDeliveryDate: text("required_delivery_date"),
+  // A pasted/typed note describing a supplier quotation already in hand —
+  // deliberately text, not a file upload: an anonymous, unauthenticated
+  // submitter has no account to own an uploaded file under, and this
+  // platform's document-authorization model (Priority 1) assumes every
+  // stored file has a real owner. A real limitation, not hidden — see
+  // docs/production-readiness.md's Priority 9 section.
+  existingQuoteNote: text("existing_quote_note").notNull().default(""),
+  preferredContactMethod: text("preferred_contact_method").notNull().default(""),
+  // A timestamp, not a boolean — this is a consent record, not a UI
+  // preference; matches this schema's existing convention for consent
+  // (introductions.demandConsentAt/supplyConsentAt) over a plain flag that
+  // can't say when consent was given.
+  consentAt: text("consent_at"),
 });
 
 export const organizations = sqliteTable("organizations", {

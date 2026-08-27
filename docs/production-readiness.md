@@ -1040,7 +1040,159 @@ manifest.
 
 ---
 
-## Priorities 9–13
+## Priority 9 — Low-friction customer acquisition
+
+**Status: verified.**
+
+**Files changed:** `db/schema.ts` (`marketRequests` gains `quantity`,
+`unit`, `productSpec`, `requiredDeliveryDate`, `existingQuoteNote`,
+`preferredContactMethod`, `consentAt` — all additive/nullable),
+`drizzle/0015_tough_butterfly.sql` (migration), `app/api/market-requests/route.ts`
+(role:`quote_request` path: origin optional, consent mandatory, new
+fields persisted; every pre-existing role's behavior unchanged),
+`app/quote/page.tsx` (new), `app/quote.css` (new, genuinely mobile-first
+— single-column by default, no desktop-only grid), `app/layout.tsx`
+(registers the new stylesheet), `app/page.tsx` (one new homepage CTA
+link), `app/admin/page.tsx` (Listings tab surfaces the new fields when
+present), `tests/unit/market-requests-route.test.ts` (new).
+
+**What this actually is**: a dedicated `/quote` page collecting exactly
+the mission's field list — product, quantity/unit, spec (optional),
+origin **if known** (optional — the mission's own phrasing), destination,
+required delivery date (optional), an existing supplier quotation if
+available (as pasted text, not a file — see below), preferred contact
+method, and mandatory consent — with the headline promise stated
+verbatim: *"Know your complete landed cost before sending money."* No
+login, no session, no organization required to submit. It POSTs to the
+SAME public `/api/market-requests` route the existing homepage
+classifieds form already uses (`role:"quote_request"` distinguishes it),
+reusing that route's existing Turnstile anti-abuse gate rather than
+building a second one.
+
+**A real gap this closes, found during inspection, not assumed**: before
+this, the ONLY way to get any preliminary value from this platform was
+`/deal/new` → `POST /api/deals`, which has always required a full,
+authenticated account (`requireUserOrResponse`) — there was no path to
+"preliminary value before full account creation" at all. `/quote` is
+that path; `/deal/new` is untouched (Phase 1–4 working code, not
+rewritten).
+
+**Auth boundary respected, not just asserted**: `/quote`'s own submit
+response is a plain confirmation (id + status only, matching the
+existing route's response shape) — it does not, and structurally cannot,
+reveal a counterparty, a document, or any protected detail, because it
+performs no read of any of that data. The confirmation screen offers an
+OPTIONAL "create a free account" link (to `/register`) explaining what
+becomes visible after — counterparties, protected introductions,
+secure documents — without ever weakening the untouched auth gates that
+already protect those elsewhere in the app (Priority 1).
+
+**A real, explicit scoping decision, not a silent omission**: "supplier
+quotation if available" is collected as free TEXT
+(`existingQuoteNote`), not a file upload. An anonymous, unauthenticated
+submitter has no account to own an uploaded file under, and this
+platform's document-authorization model (Priority 1's
+`canUploadDealDocument`/`canViewDealDocument`) assumes every stored file
+has a real owner and a real deal to belong to — neither exists yet for
+a `/quote` submission. Building anonymous file upload would mean either
+weakening that model or building a parallel one; out of this priority's
+scope, and documented as a real limitation, not hidden.
+
+**Consent is a genuine gate, not decorative metadata**: `consentAt` is a
+timestamp (matching this schema's existing consent convention —
+`introductions.demandConsentAt`/`supplyConsentAt` — over a bare
+boolean), and the API rejects a `role:"quote_request"` submission with
+no `consent` field with a 400, checked server-side, not only via the
+HTML `required` checkbox attribute (verified as a real attack case
+below — a direct API call bypassing the browser entirely).
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (45 warnings —
++3 over Priority 8's 42, all the SAME pre-existing warning classes
+already present dozens of times across this codebase —
+`no-html-link-for-pages`/`react-hooks/set-state-in-effect` — not a new
+category) · **150/150 tests** (8 new: anonymous no-origin no-account
+submission, mandatory consent rejection, base-field validation, the full
+new field set persisting correctly, the pre-existing classifieds roles'
+behavior proven UNCHANGED by regression tests, a forged
+`organizationId` from an anonymous caller being dropped not trusted, an
+invalid quantity being dropped rather than stored as a fabricated
+number) · `build` clean, `/quote` present in the route manifest.
+
+**Live browser + attack verification, not just unit tests:**
+- Mobile viewport (390×844, iPhone-sized): `/quote` loads directly with
+  zero NEW console errors — the one favicon 404 present is a confirmed
+  PRE-EXISTING, sitewide gap (reproduced on the homepage too, which also
+  has several pre-existing 502s from blocked external trade-data
+  fetches in this sandboxed environment) — not something this priority
+  introduced, and not silently excluded without checking first. No
+  horizontal overflow at 390px.
+- An empty submit is blocked by the browser (HTML5 required attributes)
+  — no request is sent. Filling in only product/destination/contact
+  (deliberately no origin, no spec, no delivery date, no existing
+  quote — the genuinely minimal path) and checking consent → a real
+  row lands in D1 with `origin:""` (never a guessed default),
+  `ownerEmail: null` (truly anonymous — no account silently created),
+  and a real `consentAt` timestamp.
+- **Attack**: submitting without checking the consent checkbox is
+  blocked client-side; a **direct API call bypassing the browser
+  entirely**, with no `consent` field at all, is independently rejected
+  server-side with 400 — the gate is real, not cosmetic.
+- **Attack**: a direct API call from an anonymous caller supplying a
+  forged `organizationId` (`"1"`, no real membership) → the request
+  still succeeds (201), but the forged id is silently dropped, not
+  trusted — confirmed via a direct D1 read (`organization_id: null`),
+  matching Priority 1's "never trust a client-supplied id" discipline.
+- **Regression, checked live not assumed**: the pre-existing homepage
+  classifieds role (`"wanted"`) still requires `origin` — a direct API
+  call omitting it → 400, exactly the pre-Priority-9 behavior.
+- Desktop viewport (1440×900): the identical flow works end to end —
+  the mobile-first CSS isn't degrading the desktop experience.
+- **Accessibility tree** (a real Playwright accessibility snapshot, not
+  only an automated scanner — honoring the mission's explicit
+  screen-reader requirement): every textbox/combobox/checkbox/button on
+  the form has a real, non-empty accessible name — 0 unnamed controls.
+  The consent checkbox's accessible name is the FULL consent sentence,
+  not just "I agree" — a screen reader user hears the actual
+  commitment being made. **Keyboard-only**: Tab order reaches every
+  field in sequence and lands on the real submit button, activatable
+  without a mouse.
+- The homepage carries a real, working CTA (`Get your landed cost →`)
+  linking to `/quote`, verified present in a live page load, not just
+  in source.
+- The existing, authenticated admin desk's Listings tab — untouched
+  API, only the render — correctly surfaces the new fields
+  (`quantity`/`unit`, `productSpec`, `requiredDeliveryDate`,
+  `preferredContactMethod`, `existingQuoteNote`) for real
+  `quote_request` rows created during this verification run, confirmed
+  with a live screenshot-equivalent text dump, not assumed from the
+  diff.
+
+**Remaining risks, explicitly deferred:**
+- No rate limiting specific to `/quote` beyond the existing shared
+  Turnstile gate on `/api/market-requests` (disabled in this
+  environment — no `TURNSTILE_SECRET_KEY` configured, same
+  pre-existing limitation noted for the rest of the public POST
+  endpoints in Priority 2's section).
+- No file-upload path for "existing supplier quotation" — text only,
+  by deliberate design (see above), not by oversight.
+- This priority does not yet connect a submitted `quote_request` row to
+  Priority 13's future "qualified buyer requests"/"time to first useful
+  quote" metrics — the data (role, timestamps, consent) is there to
+  support it, but no dashboard consumes it yet; that's Priority 13's
+  territory.
+- `.dealform` (used by the pre-existing, auth-gated `/deal/new`) has NO
+  mobile breakpoint at all and would visibly degrade on a narrow
+  viewport — noticed while building this priority's genuinely
+  mobile-first `.quoteform` styles, but deliberately NOT touched here:
+  fixing it is unrelated to this priority's own deliverable and risks
+  scope creep into "rewriting working Phase 1–4 code" the mission
+  explicitly warns against. Flagged here as a real, separate follow-up.
+
+**Commit:** `pending`
+
+---
+
+## Priorities 10–13
 
 Not started. Worked next, one focused commit (or a few) per priority,
 each getting its own dated section here — never marked verified without
