@@ -396,6 +396,68 @@ export const disputeEvents = sqliteTable("dispute_events", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+// ---------------------------------------------------------------------------
+// Trade intelligence persistence (Phase 4). Every figure the Opportunity
+// Finder or the country-level ImportIntelligence panel shows must trace back
+// to one of these rows — never a number invented for a hypothetical
+// candidate. Two layers:
+//  - sourceRecords: one row per official datapoint actually used (a single
+//    year's import value, a single supplier's share, a World Bank
+//    indicator reading...) with full provenance — source org, source URL,
+//    reporting/partner country, period, evidence category, retrieval date.
+//    This is the audit trail: "what did we look at, and when."
+//  - tradeIntelligenceSnapshots: the full computed response for one
+//    (country, hsCode) pair, cached so a repeat lookup — or the
+//    Opportunity Finder scoring many candidates at once — doesn't refetch
+//    UN Comtrade/World Bank on every request. Refreshed by
+//    lib/trade-intelligence.ts, both on-demand (a live user lookup that
+//    finds a stale/missing cache) and by the Cron Trigger in
+//    worker/index.ts working through intelligenceWatchlist.
+// ---------------------------------------------------------------------------
+
+export const EVIDENCE_CATEGORIES = ["official", "mirror_reported", "market_reported", "estimated", "forecast"] as const;
+export type EvidenceCategory = (typeof EVIDENCE_CATEGORIES)[number];
+
+export const sourceRecords = sqliteTable("source_records", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  sourceOrganization: text("source_organization").notNull(),
+  sourceUrl: text("source_url").notNull(),
+  reportingCountry: text("reporting_country").notNull(),
+  partnerCountry: text("partner_country").notNull().default(""), // "" = world / all partners
+  hsCode: text("hs_code").notNull().default(""),
+  period: text("period").notNull(),
+  metric: text("metric").notNull(), // e.g. "import_value_usd", "population_growth_pct"
+  value: real("value").notNull().default(0),
+  unit: text("unit").notNull().default(""),
+  evidenceCategory: text("evidence_category", { enum: EVIDENCE_CATEGORIES }).notNull(),
+  confidence: integer("confidence"), // 0-100, forecasts only
+  methodology: text("methodology").notNull().default(""),
+  limitations: text("limitations").notNull().default(""),
+  retrievedAt: text("retrieved_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const tradeIntelligenceSnapshots = sqliteTable("trade_intelligence_snapshots", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  country: text("country").notNull(),
+  hsCode: text("hs_code").notNull(),
+  responseJson: text("response_json").notNull(),
+  retrievedAt: text("retrieved_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+// Seeded corridor/product pairs the Cron Trigger keeps refreshed, so the
+// Opportunity Finder has real cached demand signal to rank against instead
+// of needing a live Comtrade call per candidate per request. A pair earns
+// a permanent spot the first time any user actually looks it up (see
+// lib/trade-intelligence.ts) — this is a cache-warming list driven by real
+// demand, not a hand-picked "opportunities" list dressed up as data.
+export const intelligenceWatchlist = sqliteTable("intelligence_watchlist", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  country: text("country").notNull(),
+  hsCode: text("hs_code").notNull(),
+  lastRefreshedAt: text("last_refreshed_at"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const notifications = sqliteTable("notifications", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   recipientEmail: text("recipient_email").notNull(),

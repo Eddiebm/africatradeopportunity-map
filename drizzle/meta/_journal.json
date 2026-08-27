@@ -50,6 +50,13 @@
       "when": 1787791235390,
       "tag": "0006_perpetual_spot",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1787792820065,
+      "tag": "0007_past_skrulls",
+      "breakpoints": true
     }
   ]
 }

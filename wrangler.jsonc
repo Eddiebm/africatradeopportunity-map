@@ -46,6 +46,14 @@
     "enabled": true
   },
 
+  // Refreshes db/schema.ts's intelligenceWatchlist (see
+  // lib/trade-intelligence.ts) — daily is plenty; UN Comtrade/World Bank
+  // data doesn't change intraday, and staying well under free-tier rate
+  // limits matters more than freshness here.
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
+
   "env": {
     "preview": {
       "d1_databases": [
