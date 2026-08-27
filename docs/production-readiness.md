@@ -1570,7 +1570,7 @@ and end-to-end registration/quote-request attribution integration) ·
   Priority 10's `sendWhatsAppMessage` primitive could carry this later,
   not wired in this priority to keep the change focused.
 
-**Commit:** `pending`
+**Commit:** `adb14c1`
 
 ---
 
