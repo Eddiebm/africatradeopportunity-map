@@ -1851,7 +1851,7 @@ copy in user-facing text generally, not just in this one sentence.
 - No CSV/export path for these figures — internal-only, read live in
   the browser; exporting was not part of the mission checklist.
 
-**Commit:** pending
+**Commit:** `7eda7e2`
 
 ---
 
