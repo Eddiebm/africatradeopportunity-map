@@ -1,6 +1,6 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../../../../db";
-import { organizationMembers, organizations, users } from "../../../../db/schema";
+import { organizationMembers, organizations, quoteRequests, users } from "../../../../db/schema";
 import { requireUserOrResponse } from "../../../../lib/auth/current-user";
 
 async function membershipFor(organizationId: number, userId: number) {
@@ -33,6 +33,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     .innerJoin(users, eq(organizationMembers.userId, users.id))
     .where(eq(organizationMembers.organizationId, organizationId));
 
+  // Any active member can see (and, elsewhere, respond to) quote requests
+  // sent to this organization — submitting a quote only requires active
+  // membership, not ownership, so this list needs to match that.
+  const incomingQuoteRequests = await db
+    .select()
+    .from(quoteRequests)
+    .where(eq(quoteRequests.recipientOrganizationId, organizationId))
+    .orderBy(desc(quoteRequests.createdAt))
+    .limit(100);
+
   return Response.json({
     organization: { ...organization, myRole: membership.role, isOwner: organization.ownerEmail === user.email },
     members: members.map((m) => ({
@@ -44,6 +54,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       invitedEmail: m.member.invitedEmail,
       joinedAt: m.member.joinedAt,
     })),
+    incomingQuoteRequests,
   });
 }
 

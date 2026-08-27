@@ -2,9 +2,11 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { loginPath } from "../../../lib/auth/paths";
+import QuoteSubmitForm from "../../components/QuoteSubmitForm";
 
 type Organization = { id: number; legalName: string; tradingName: string; country: string; registrationNumber: string; phone: string; verificationStatus: string; myRole: string; isOwner: boolean };
 type Member = { id: number; email: string; displayName: string; role: string; status: string; invitedEmail: string; joinedAt: string | null };
+type IncomingQuoteRequest = { id: string; dealId: number | null; quoteType: string; status: string; dueAt: string | null; createdAt: string };
 
 const ROLES = [
   ["trader", "Trader"],
@@ -20,6 +22,7 @@ export default function OrganizationProfile() {
   const { id } = useParams<{ id: string }>();
   const [org, setOrg] = useState<Organization | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  const [quoteRequests, setQuoteRequests] = useState<IncomingQuoteRequest[]>([]);
   const [state, setState] = useState("Loading…");
   const [inviteState, setInviteState] = useState("");
 
@@ -29,10 +32,11 @@ export default function OrganizationProfile() {
       location.href = loginPath(location.pathname);
       return;
     }
-    const d = (await r.json()) as { organization?: Organization; members?: Member[]; error?: string };
+    const d = (await r.json()) as { organization?: Organization; members?: Member[]; incomingQuoteRequests?: IncomingQuoteRequest[]; error?: string };
     if (r.ok && d.organization) {
       setOrg(d.organization);
       setMembers(d.members || []);
+      setQuoteRequests(d.incomingQuoteRequests || []);
       setState("");
     } else {
       setState(d.error || "Organization not found.");
@@ -135,6 +139,31 @@ export default function OrganizationProfile() {
               )}
             </div>
           ))}
+        </article>
+      </section>
+
+      <section className="roomgrid">
+        <article style={{ gridColumn: "1/3" }}>
+          <div className="roomtitle">
+            <small>QUOTE REQUESTS RECEIVED</small>
+            <b>{quoteRequests.filter((q) => q.status === "requested").length} open</b>
+          </div>
+          {quoteRequests.length ? (
+            quoteRequests.map((q) => (
+              <div key={q.id}>
+                <div className="task">
+                  <i>{q.status === "requested" ? "…" : q.status === "quoted" ? "✓" : "—"}</i>
+                  <span>
+                    <b>{q.quoteType.replaceAll("_", " ")} quote{q.dealId ? ` — deal #${q.dealId}` : ""}</b>
+                    <small>{q.status.replaceAll("_", " ")}{q.dueAt ? ` · needed by ${q.dueAt}` : ""}</small>
+                  </span>
+                </div>
+                {q.status === "requested" && <QuoteSubmitForm quoteRequestId={q.id} />}
+              </div>
+            ))
+          ) : (
+            <p>No quote requests yet — these appear once a trader requests a quote from this organization.</p>
+          )}
         </article>
       </section>
 

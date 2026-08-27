@@ -1,7 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 import { requirePlatformRoleOrResponse } from "../../../../lib/auth/current-user";
 import { getDb } from "../../../../db";
-import { adminAuditEvents, dealDocuments, deals, introductions, marketRequests, matchCandidates, organizations, verificationChecks } from "../../../../db/schema";
+import { adminAuditEvents, dealDocuments, deals, introductions, marketRequests, matchCandidates, milestones, organizations, verificationChecks } from "../../../../db/schema";
 
 const REVIEWER_ROLES = ["administrator", "verification_analyst"] as const;
 
@@ -13,13 +13,19 @@ const allowed: Record<string, string[]> = {
   match: ["awaiting_counterparty", "mutual_interest", "approved", "rejected"],
   organization: ["reported", "under_review", "verified", "rejected"],
   introduction: ["awaiting_consent", "pending_review", "approved", "rejected"],
+  // Evidence state only — see app/api/deals/[id]/milestones/[milestoneId]/route.ts.
+  // Marking a milestone "verified" here confirms the evidence was reviewed;
+  // it does not move money. milestones.status (proposed/etc.) is untouched
+  // by this — a licensed payment partner, not this platform, executes any
+  // actual release.
+  milestone: ["missing", "submitted", "verified"],
 };
 
 export async function GET(request: Request) {
   const auth = await requirePlatformRoleOrResponse(request, [...REVIEWER_ROLES]);
   if (auth instanceof Response) return auth;
   const db = getDb();
-  const [dealRows, requestRows, checks, documents, matches, organizationRows, introductionRows] = await Promise.all([
+  const [dealRows, requestRows, checks, documents, matches, organizationRows, introductionRows, milestoneRows] = await Promise.all([
     db.select().from(deals).orderBy(desc(deals.id)).limit(100),
     db.select().from(marketRequests).orderBy(desc(marketRequests.id)).limit(100),
     db.select().from(verificationChecks).orderBy(desc(verificationChecks.id)).limit(300),
@@ -27,8 +33,9 @@ export async function GET(request: Request) {
     db.select().from(matchCandidates).orderBy(desc(matchCandidates.createdAt)).limit(200),
     db.select().from(organizations).orderBy(desc(organizations.id)).limit(200),
     db.select().from(introductions).orderBy(desc(introductions.createdAt)).limit(200),
+    db.select().from(milestones).where(eq(milestones.evidenceStatus, "submitted")).limit(200),
   ]);
-  return Response.json({ deals: dealRows, requests: requestRows, checks, documents, matches, organizations: organizationRows, introductions: introductionRows });
+  return Response.json({ deals: dealRows, requests: requestRows, checks, documents, matches, organizations: organizationRows, introductions: introductionRows, milestones: milestoneRows });
 }
 
 export async function PATCH(request: Request) {
@@ -36,7 +43,12 @@ export async function PATCH(request: Request) {
   if (auth instanceof Response) return auth;
   const admin = auth;
 
-  const body = await request.json() as { entity?: string; id?: number | string; status?: string; reason?: string };
+  let body: { entity?: string; id?: number | string; status?: string; reason?: string };
+  try {
+    body = (await request.json()) as typeof body;
+  } catch {
+    return Response.json({ error: "Invalid request body." }, { status: 400 });
+  }
   const status = String(body.status || "");
   const reason = String(body.reason || "").trim();
 
@@ -130,6 +142,11 @@ export async function PATCH(request: Request) {
     if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
     await db.update(organizations).set({ verificationStatus: status }).where(eq(organizations.id, numericId));
     await db.insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "organization", entityId: numericId, fromStatus: row.verificationStatus, toStatus: status, reason });
+  } else if (body.entity === "milestone") {
+    const [row] = await db.select().from(milestones).where(eq(milestones.id, numericId)).limit(1);
+    if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
+    await db.update(milestones).set({ evidenceStatus: status }).where(eq(milestones.id, numericId));
+    await db.insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "milestone", entityId: numericId, fromStatus: row.evidenceStatus, toStatus: status, reason });
   } else {
     return Response.json({ error: "Invalid record." }, { status: 400 });
   }
