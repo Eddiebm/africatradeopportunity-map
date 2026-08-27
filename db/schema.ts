@@ -281,6 +281,22 @@ export const milestones = sqliteTable("milestones", {
   releaseCondition: text("release_condition").notNull(),
   status: text("status").notNull().default("proposed"),
   evidenceStatus: text("evidence_status").notNull().default("missing"),
+  // Priority 8 (docs/production-readiness.md): "overdue milestones" needs a
+  // real deadline to compare against — nullable, and left null unless
+  // something honest actually set it (app/api/deals/route.ts seeds the
+  // final "Delivery acceptance" milestone's dueAt from the deal's own
+  // targetDate; app/api/admin/milestones/[id]/schedule/route.ts lets a
+  // reviewer set/change one explicitly). A null dueAt is never treated as
+  // "overdue" — see lib/exceptions.ts's overdue_milestone detector.
+  dueAt: text("due_at"),
+  // Nullable with NO column default — D1's SQLite build rejects `ALTER
+  // TABLE ADD COLUMN` with a non-constant default (CURRENT_TIMESTAMP),
+  // confirmed live when generating this migration (a real, repeatable
+  // platform limitation, same category as db/schema.ts's note on
+  // deals.stage's default from Priority 7). Existing rows predating this
+  // migration are simply null; every new milestone gets it set explicitly
+  // at the one insert site (app/api/deals/route.ts) instead.
+  createdAt: text("created_at"),
 });
 
 export const dealEvents = sqliteTable("deal_events", {
@@ -595,6 +611,107 @@ export const idempotencyKeys = sqliteTable(
   },
   (table) => ({
     userEndpointKey: uniqueIndex("idempotency_keys_user_endpoint_key").on(table.userId, table.endpoint, table.key),
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Priority 8 (docs/production-readiness.md): "Build an exception operations
+// queue ... risk-ranked and deadline-ranked ... The standard operational
+// path should not require manually monitoring every deal; staff attention
+// should focus on exceptions."
+//
+// This table is a real work queue, not a duplicate ledger: every row here
+// exists because lib/exceptions.ts's detectors found an ACTUAL condition in
+// deals/verificationChecks/organizationVerifications/dealDocuments/
+// milestones/disputes at sync time — never fabricated, never a guess. Two
+// kinds of writer touch it:
+//  - The system (lib/exceptions.ts's syncExceptionQueue, run by the Cron
+//    Trigger and lazily on every admin GET): creates new rows for newly
+//    detected conditions, and auto-resolves rows whose underlying condition
+//    has cleared on its own (resolvedByEmail stays "" for these — an empty
+//    resolvedByEmail is this table's signal that no human reviewed the
+//    resolution, matching this schema's existing "" = unset convention, e.g.
+//    disputes.assignedToEmail).
+//  - A reviewer, via app/api/admin/exceptions/[id]/route.ts: assigns an
+//    owner, starts working it, resolves or dismisses it with a required
+//    reason — logged to the existing adminAuditEvents table like every
+//    other admin decision, not a new parallel log.
+//
+// DEDUPE, reusing the idempotencyKeys table's proven pattern above rather
+// than a fresh design: `dedupeKey` identifies "this condition on this
+// entity" (e.g. "overdue_milestone:milestone:41"); `openDedupeKey` equals
+// `dedupeKey` for every status EXCEPT 'resolved', and is set back to NULL
+// only when a row resolves (SQLite's unique index treats every NULL as
+// distinct, so many resolved rows can share a dedupeKey over time — a
+// condition that recurs after being fixed legitimately gets a fresh row,
+// preserving full history instead of overwriting it). The unique index is
+// what actually stops two concurrent syncs (two admins loading the queue at
+// once) from both inserting a duplicate open row for the same condition —
+// exactly the race docs/production-readiness.md already found and fixed
+// once for idempotencyKeys; same fix, same reasoning, reused here.
+// 'dismissed' deliberately does NOT clear openDedupeKey: a reviewer
+// dismissing a detected condition ("not actionable, I've seen it") should
+// not have the very next sync immediately recreate it — the row only frees
+// up once the underlying condition genuinely clears (system auto-resolve)
+// or a reviewer explicitly resolves it.
+export const EXCEPTION_TYPES = [
+  "failed_verification_check",
+  "expired_verification_check",
+  "failed_organization_verification",
+  "expired_organization_verification",
+  "rejected_document",
+  "missing_required_document",
+  "overdue_milestone",
+  "payment_exception",
+  "stalled_deal",
+  // Three deliberately DISTINCT types rather than one shared
+  // "high_risk_deal" — see lib/exceptions.ts's detectHighRiskDeals: a
+  // single deal can trigger more than one of these AT ONCE (e.g. a
+  // high-value deal in a corridor with no operational template), and each
+  // needs its own dedupeKey (exceptionType:entityType:entityId) or the
+  // second condition's insert would collide with the first's unique
+  // openDedupeKey and silently never get recorded — a real bug caught
+  // before shipping, not a hypothetical one.
+  "high_value_deal",
+  "unproven_corridor_deal",
+  "verification_regression",
+  "dispute_overdue",
+] as const;
+export type ExceptionType = (typeof EXCEPTION_TYPES)[number];
+
+export const EXCEPTION_SEVERITIES = ["low", "medium", "high", "critical"] as const;
+export type ExceptionSeverity = (typeof EXCEPTION_SEVERITIES)[number];
+
+export const EXCEPTION_STATUSES = ["open", "in_progress", "resolved", "dismissed"] as const;
+export type ExceptionStatus = (typeof EXCEPTION_STATUSES)[number];
+
+export const exceptions = sqliteTable(
+  "exceptions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    exceptionType: text("exception_type").notNull(),
+    severity: text("severity").notNull(),
+    dealId: integer("deal_id").references(() => deals.id),
+    organizationId: integer("organization_id").references(() => organizations.id),
+    disputeId: integer("dispute_id").references(() => disputes.id),
+    entityType: text("entity_type").notNull(),
+    entityId: integer("entity_id").notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    openDedupeKey: text("open_dedupe_key"),
+    summary: text("summary").notNull(),
+    responsibleParty: text("responsible_party").notNull().default(""),
+    ownerEmail: text("owner_email").notNull().default(""),
+    deadline: text("deadline"),
+    status: text("status").notNull().default("open"),
+    detectedAt: text("detected_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    resolvedAt: text("resolved_at"),
+    resolvedByEmail: text("resolved_by_email").notNull().default(""),
+    resolutionSummary: text("resolution_summary").notNull().default(""),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    openDedupeKeyIdx: uniqueIndex("exceptions_open_dedupe_key_idx").on(table.openDedupeKey),
   }),
 );
 

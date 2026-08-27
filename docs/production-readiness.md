@@ -859,7 +859,188 @@ role-authorization for the administrator-only transition, and the
 
 ---
 
-## Priorities 8–13
+## Priority 8 — Exception operations queue
+
+**Status: verified.**
+
+**Files changed:** `db/schema.ts` (`exceptions` table + `EXCEPTION_TYPES`/
+`EXCEPTION_SEVERITIES`/`EXCEPTION_STATUSES`; `milestones.dueAt` +
+`milestones.createdAt`), `drizzle/0014_chubby_thor_girl.sql` (migration),
+`lib/exceptions.ts` (new — all detectors + `syncExceptionQueue`),
+`lib/cron-runs.ts` (generalized `recordCronRun<T>` — see below),
+`worker/index.ts` (wires `exception-queue-sync` into the existing Cron
+Trigger), `app/api/admin/exceptions/route.ts` (new — GET syncs+lists,
+PATCH assign/start/resolve/dismiss), `app/api/admin/milestones/[id]/schedule/route.ts`
+(new — the only way `milestones.dueAt` gets set), `app/api/deals/route.ts`
+(seeds milestone 4's `dueAt` from the deal's own `targetDate`),
+`app/api/disputes/route.ts` (wires the previously-dead `responseDueAt`
+column — see below), `app/admin/page.tsx` + `app/admin.css` (new
+Exceptions tab, now the default tab), `tests/unit/exceptions.test.ts`
+(new).
+
+**What this actually is**: not a new ledger — a read of REAL conditions
+already sitting in `deals`/`verificationChecks`/`organizationVerifications`/
+`dealDocuments`/`milestones`/`disputes`, surfaced in one risk/deadline-
+ranked queue so "the standard operational path should not require
+manually monitoring every deal" (the mission's own phrase) is actually
+true. Every detector in `lib/exceptions.ts` is documented with exactly
+which real column it reads; there is deliberately **no** "material
+landed-cost change" detector — `dealCosts` is write-once at deal creation
+and no route in this codebase has ever updated it, so there is no real
+signal to detect yet. Fabricating one would violate this project's core
+rule; this is called out explicitly as **intentionally deferred**, not
+silently skipped, pending either a real cost-revision flow or Priority
+12's landed-cost work.
+
+**Two previously-dead columns, wired up for real, not just noticed:**
+- `verificationChecks.expiresAt` existed since Phase 3 but nothing ever
+  read it — `expired_verification_check` is the first real consumer.
+- `disputes.responseDueAt` existed in the schema with nothing ever
+  setting it. `app/api/disputes/route.ts` now sets it at dispute creation
+  (this platform's own 3-day response-SLA policy —
+  `DISPUTE_RESPONSE_SLA_MS`, documented as internal policy, not an
+  external SLA, same honesty convention as Priority 6's thresholds) —
+  `dispute_overdue` is the first real consumer of that too.
+
+**Detectors implemented, each reading a real signal:**
+`failed_verification_check`, `expired_verification_check`,
+`failed_organization_verification` / `expired_organization_verification`
+(only the LATEST fact per org+level counts — an old failed attempt a
+later re-check superseded is history, not an open exception),
+`rejected_document`, `missing_required_document` (a stage-based
+heuristic — `dealDocuments` has no `createdAt` to measure elapsed time
+against, a real documented gap, not a fabricated day-count),
+`overdue_milestone` (only fires on a milestone with a REAL `dueAt` — a
+null `dueAt` is never "overdue"), `payment_exception` / `stalled_deal`
+(real signal: `deals.updatedAt`, already stamped by every stage
+transition), `high_value_deal`, `unproven_corridor_deal`,
+`verification_regression` (**a genuine cross-priority integration and a
+real gap the state machine itself can't catch**: Priority 7's
+`counterparties_verified` precondition only checks AT the moment of that
+one transition — if a party's verification later expires or a re-check
+fails, a deal that already passed that gate isn't retroactively
+blocked. This detector is the ongoing check for that regression,
+severity `critical`), `dispute_overdue`.
+
+**Dedupe and the audit trail, reusing two already-proven patterns rather
+than inventing new ones:**
+- **Insert-based claim via a unique index** (`exceptions.openDedupeKey`,
+  unique) — the exact fix already applied once this session to
+  `idempotencyKeys`'s select-then-insert race. `openDedupeKey` equals
+  `dedupeKey` (`exceptionType:entityType:entityId`) for every status
+  except `resolved`; SQLite treats every `NULL` as distinct, so many
+  resolved rows can share a `dedupeKey` over time without violating the
+  index. `dismissed` deliberately keeps the key claimed (see attack case
+  below) — only `resolved` frees it.
+- **Audit trail via the existing `adminAuditEvents` table** — every
+  human assign/start/resolve/dismiss writes a row there, same as every
+  other admin-desk decision, not a new parallel log. System auto-resolves
+  (the condition genuinely cleared) are self-documenting on the
+  `exceptions` row itself (`resolvedByEmail: ""`, matching this schema's
+  existing "" = unset convention) — there is no "system" user to attach
+  to `adminAuditEvents.actorUserId` (`NOT NULL`), the same reasoning
+  Priority 3's `cronRuns` table already established for background work.
+
+**A real bug caught during inspection, before it shipped**: the first
+draft of `detectHighRiskDeals` gave the "high-value deal" and
+"unproven-corridor deal" checks the SAME `entityType:"deal"` +
+`entityId:deal.id`, both under one shared `high_risk_deal` type — meaning
+their `dedupeKey`s collided, and a deal triggering both conditions at
+once would silently only ever get ONE of the two exceptions recorded
+(the second insert loses the unique-index race to the first, and that's
+treated as "already exists," not an error). Fixed by giving each
+condition its own distinct exception type (`high_value_deal`,
+`unproven_corridor_deal`, `verification_regression`) — caught by
+re-reading the diff before writing tests, not by a failing test.
+
+**`recordCronRun` generalized, not duplicated**: Priority 3's helper was
+typed to require a `{refreshed, failed}` result shape, fitting only the
+one job that existed then. Rather than bypass it or hand-roll a second
+cron-tracking helper for `exception-queue-sync`, it now accepts any
+result type and structurally extracts `refreshed`/`failed` counts when
+present, storing `null` otherwise — the intelligence-watchlist job's
+behavior is unchanged; the exception-sync job's own `{created,
+autoResolved, totalOpen}` counts still reach the caller and
+`console.log`, just not those two specifically-named columns.
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (42 warnings,
+unchanged) · **142/142 tests** (22 new — detection correctness per
+detector, the dedupe race under real `Promise.all` concurrency, real
+auto-resolve, a recurrence-after-resolution getting a fresh row instead
+of silently reopening the old one, the full assign→start→resolve
+lifecycle, dismiss's "not immediately recreated" behavior, every route's
+role gating) · `build` clean, both new routes present in the route
+manifest.
+
+**Live browser + attack verification, not just unit tests:**
+- A real deal created through the real `/deal/new` form, a real
+  verification check failed via direct D1 update (simulating a reviewer
+  decision), then the **already-existing** admin `/admin` page loaded
+  fresh: the Exceptions tab (now the default tab) shows it with zero
+  console errors, correct severity (`HIGH`), and the correct
+  `responsibleParty` (the real deal owner's email) — not a fixture.
+- **A genuinely unplanned real find**: the SAME live run also surfaced a
+  `missing_required_document` exception on a deal left over from
+  Priority 7's own verification session (`Commercial Invoice`/
+  `Packing List` still `required` on a deal that had already reached
+  `payment_confirmed`) — proof the detector works against organically
+  existing data, not only data manufactured for this test.
+- **Attack**: a plain trader (deal owner) → `GET /api/admin/exceptions`
+  → 403. → `PATCH .../exceptions` (dismiss) → 403.
+- **Attack**: anonymous (no session) → `GET /api/admin/exceptions` → 401.
+- **Attack**: `PATCH` with no `reason` → 400 on every action, matching
+  every other admin-desk decision.
+- **Attack**: a manipulated/nonexistent exception id (`999999999`) → 404.
+- **Attack**: resolve with no `resolutionSummary` → 400.
+- A real `verification_analyst` (not just administrator — proving
+  least-privilege isn't accidentally over-restricted) assigns the
+  exception to themselves → 200, persisted, status auto-bumped to
+  `in_progress`, visible in the admin UI after a real reload.
+- The underlying verification check is genuinely re-verified (not the
+  exception row edited directly) → the next sync **auto-resolves** it
+  with `resolvedByEmail: ""` — a system resolution, not a fabricated
+  human one.
+- A reviewer schedules a real milestone `dueAt` in the past via
+  `PATCH /api/admin/milestones/:id/schedule` → the next sync genuinely
+  flags it `overdue_milestone` — end-to-end from a human decision to a
+  detected exception.
+- Mobile viewport (390×844): no horizontal overflow on the Exceptions
+  tab. Keyboard-only: first `Tab` reaches a real focusable element.
+- **Accessibility tree** (not just an automated scanner — a real
+  Playwright accessibility snapshot, honoring the mission's explicit
+  screen-reader requirement): every tab button and every queue action
+  button (`Assign to me`/`Start work`/`Resolve`/`Dismiss`) has a real,
+  non-empty accessible name — 0 unnamed interactive nodes found.
+  Severity is conveyed as visible TEXT (`HIGH`/`MEDIUM`/…), with the
+  color border strictly supplementary, not the only signal.
+
+**Remaining risks, explicitly deferred:**
+- No "material landed-cost change" detector — see above; genuinely no
+  real signal exists yet, not a shortcut.
+- `missing_required_document` is a stage-based heuristic, not a
+  day-count one, because `dealDocuments` has no `createdAt` column.
+- Per-row queue action buttons (`Assign to me`, etc.) don't carry a
+  disambiguating accessible name beyond DOM order — a pre-existing
+  pattern shared by every other admin-desk tab (Listings, Documents,
+  Checks, …), not a regression introduced here; a real follow-up for a
+  future accessibility pass across the whole admin console, not scoped
+  to this priority alone.
+- `syncExceptionQueue`'s org-verification "latest fact" lookup
+  (`latestOrgVerificationFacts`) does a full-table scan of
+  `organization_verifications` in JS rather than an indexed query —
+  fine at this platform's current data volume (matches this codebase's
+  existing `.limit(200–500)` scale assumptions elsewhere), worth
+  revisiting before that table reaches thousands of rows.
+- No UI filter/search on the Exceptions tab yet (open/in-progress items
+  are shown; resolved/dismissed are fetched but not surfaced in a
+  separate view) — acceptable for the current queue size, a real
+  limitation if the queue grows large.
+
+**Commit:** `pending`
+
+---
+
+## Priorities 9–13
 
 Not started. Worked next, one focused commit (or a few) per priority,
 each getting its own dated section here — never marked verified without

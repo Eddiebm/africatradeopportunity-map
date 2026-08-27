@@ -85,7 +85,26 @@ async function createDeal(req: Request, user: SessionUser) {
     });
     await db.insert(verificationChecks).values(checks.map((checkType) => ({ dealId: deal.id, checkType })));
     await db.insert(dealDocuments).values(documents.map((documentType) => ({ dealId: deal.id, documentType })));
-    await db.insert(milestones).values(releases.map(([sequence, name, percentage, releaseCondition]) => ({ dealId: deal.id, sequence, name, percentage, releaseCondition })));
+    // Priority 8 (docs/production-readiness.md): "overdue milestones" needs
+    // a real deadline. The ONLY one this platform can honestly set without
+    // fabricating precision is the final "Delivery acceptance" milestone
+    // (sequence 4) — it's a direct 1:1 mapping to the deal's own reported
+    // targetDate, not an invented intermediate schedule. Every other
+    // milestone's dueAt stays null (never "overdue") until a reviewer sets
+    // one explicitly via app/api/admin/milestones/[id]/schedule/route.ts.
+    const deliveryDueAt = body.targetDate && !Number.isNaN(Date.parse(String(body.targetDate))) ? new Date(String(body.targetDate)).toISOString() : null;
+    const now = new Date().toISOString();
+    await db.insert(milestones).values(
+      releases.map(([sequence, name, percentage, releaseCondition]) => ({
+        dealId: deal.id,
+        sequence,
+        name,
+        percentage,
+        releaseCondition,
+        createdAt: now,
+        dueAt: sequence === 4 ? deliveryDueAt : null,
+      })),
+    );
     await db.insert(dealEvents).values({ dealId: deal.id, actorEmail: user.email, eventType: "deal_created", summary: `${body.product} request opened for ${body.origin} → ${body.destination}` });
     return Response.json({ deal }, { status: 201 });
   } catch {

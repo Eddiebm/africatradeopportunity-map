@@ -4,6 +4,7 @@ import handler from "vinext/server/app-router-entry";
 import { refreshStaleWatchlist } from "../lib/trade-intelligence";
 import { logServerError, newCorrelationId } from "../lib/observability";
 import { recordCronRun } from "../lib/cron-runs";
+import { syncExceptionQueue } from "../lib/exceptions";
 
 interface Env {
   ASSETS: Fetcher;
@@ -104,6 +105,20 @@ const worker = {
         })
         .catch((error) => {
           logServerError(newCorrelationId(), { method: "CRON", pathname: "intelligence-watchlist-refresh" }, error);
+        }),
+    );
+    // Priority 8 (docs/production-readiness.md): "The standard operational
+    // path should not require manually monitoring every deal" — this is
+    // what makes that true even if no reviewer opens the exceptions queue
+    // between ticks. Also runs lazily on every GET /api/admin/exceptions
+    // (see that route), so this cron pass is a backstop, not the only path.
+    ctx.waitUntil(
+      recordCronRun("exception-queue-sync", () => syncExceptionQueue())
+        .then((result) => {
+          console.log(`[exception-queue] created ${result.created}, auto-resolved ${result.autoResolved}, open ${result.totalOpen}`);
+        })
+        .catch((error) => {
+          logServerError(newCorrelationId(), { method: "CRON", pathname: "exception-queue-sync" }, error);
         }),
     );
   },
