@@ -252,8 +252,7 @@ no runbook yet describing how an operator would actually query
 3's "operational runbook" is the right place for that, not duplicated
 here).
 
-**Commit:** `pending` — will be filled in after this section is
-committed.
+**Commit:** `fc307aa`
 
 ---
 
