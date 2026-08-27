@@ -1,14 +1,22 @@
 import { desc, eq } from "drizzle-orm";
 import { requirePlatformRoleOrResponse } from "../../../../lib/auth/current-user";
+import { attemptDealTransition } from "../../../../lib/deal-workflow";
 import { getDb } from "../../../../db";
 import { adminAuditEvents, dealDocuments, deals, disputeEvents, disputeMessages, disputes, introductions, marketRequests, matchCandidates, milestones, organizations, verificationChecks } from "../../../../db/schema";
 
 const REVIEWER_ROLES = ["administrator", "verification_analyst"] as const;
 const DISPUTE_PRIORITIES = ["normal", "high", "urgent"] as const;
 
+// Priority 7 (docs/production-readiness.md): "deal" is deliberately NOT
+// in this map — its stage is a real 13-stage graph now
+// (lib/deal-workflow.ts), not a flat set of independently-choosable
+// values. Before this, "deal" being in here meant this route would
+// accept ANY of 9 unordered values as a valid `status` regardless of
+// the deal's current one — a reviewer could jump a brand-new deal
+// straight to "closed" in one request. See the dedicated `deal` branch
+// below, which calls attemptDealTransition() instead.
 const allowed: Record<string, string[]> = {
   request: ["pending_verification", "contacted", "verified", "rejected"],
-  deal: ["intake", "investigating", "quoted", "matched", "contracting", "in_transit", "delivered", "closed", "rejected"],
   check: ["required", "submitted", "verified", "failed"],
   document: ["required", "submitted", "approved", "rejected"],
   match: ["awaiting_counterparty", "mutual_interest", "approved", "rejected"],
@@ -69,8 +77,24 @@ export async function PATCH(request: Request) {
   const status = String(body.status || "");
   const reason = String(body.reason || "").trim();
 
-  if (!body.entity || !allowed[body.entity]) return Response.json({ error: "Invalid record." }, { status: 400 });
+  if (!body.entity) return Response.json({ error: "Invalid record." }, { status: 400 });
   if (!reason) return Response.json({ error: "A reason is required for this decision." }, { status: 400 });
+
+  // Priority 7: deal-stage transitions go through the real state machine
+  // (lib/deal-workflow.ts), not the flat allowed[]-membership check below
+  // — that check can only ever say "is this status one of N values,"
+  // never "is this the actual next stage from where the deal is now,"
+  // which is the entire point of this fix.
+  if (body.entity === "deal") {
+    const dealId = Number(body.id);
+    if (!dealId) return Response.json({ error: "Invalid record." }, { status: 400 });
+    const result = await attemptDealTransition(dealId, status, admin, reason);
+    if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
+    await getDb().insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "deal", entityId: dealId, fromStatus: result.fromStage, toStatus: status, reason });
+    return Response.json({ ok: true, deal: result.deal });
+  }
+
+  if (!allowed[body.entity]) return Response.json({ error: "Invalid record." }, { status: 400 });
   if (!allowed[body.entity].includes(status)) return Response.json({ error: "Invalid status." }, { status: 400 });
 
   const db = getDb();

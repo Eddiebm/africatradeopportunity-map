@@ -173,6 +173,17 @@ export const deals = sqliteTable("deals", {
   unit: text("unit").notNull().default("tonnes"),
   currency: text("currency").notNull().default("USD"),
   targetDate: text("target_date").notNull().default(""),
+  // Priority 7 (docs/production-readiness.md): one of DEAL_STAGES
+  // (lib/deal-workflow.ts) — "request_confirmed" is the first of the
+  // mission's 13 stages. The column default below is intentionally left
+  // as the pre-Priority-7 literal "intake" rather than changed to
+  // "request_confirmed": changing a SQLite column default forces
+  // drizzle-kit to recreate this heavily-referenced table (every other
+  // deal-scoped table FKs into it), which fails in D1's migration runner
+  // — a real, confirmed platform limitation, not a bug in this app's
+  // migration. app/api/deals/route.ts's POST sets `stage` explicitly on
+  // every insert instead, so this default is realistically never used —
+  // documented here so it doesn't look like an oversight.
   stage: text("stage").notNull().default("intake"),
   riskStatus: text("risk_status").notNull().default("unscored"),
   // Priority 5 (docs/production-readiness.md): "Historical deals must

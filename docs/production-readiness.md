@@ -722,7 +722,144 @@ coverage on all three routes) · `build` clean.
 
 ---
 
-## Priorities 7–13
+## Priority 7 — Standard transaction workflow
+
+**Status: verified.**
+
+**Files changed:** `db/schema.ts` (`deals.stage` default comment
+explaining a real D1 limitation — no migration; see below),
+`lib/deal-stages.ts` (new — pure, client-safe), `lib/deal-workflow.ts`
+(new — the DB-backed state machine), `app/api/deals/route.ts` (sets
+`stage` explicitly on creation), `app/api/admin/desk/route.ts` (deal
+transitions now go through the real engine, not a flat allowed-values
+check), `app/admin/page.tsx` (deal quick-actions replaced with a real
+adjacency-aware "Advance to X" control), `tests/unit/deal-workflow.test.ts`
+(new).
+
+**What was actually broken before this**: `deals.stage` was a free-text
+column any reviewer could `PATCH` to any of 9 unordered values via the
+admin desk, with zero adjacency checking. A reviewer really could move a
+brand-new deal from `intake` straight to `closed` in one request — this
+was verified as a real, live exploit before being fixed (see attack
+case below), not a hypothetical.
+
+**The 13-stage graph** (`lib/deal-workflow.ts`) is a strict linear chain
+matching the mission's stage list exactly. Each transition defines:
+authorized roles, a precondition (where this platform's data model can
+honestly check one — see below), and reversibility. `attemptDealTransition()`
+is now the ONLY code path that writes `deals.stage` — it validates the
+deal exists, the requested "to" stage is genuinely the next stage from
+wherever the deal currently is (not any arbitrary stage), the actor's
+role is authorized for that specific edge, and any real precondition is
+met, before writing anything — and every successful transition writes a
+`dealEvents` row (`stage_transition`), reusing the existing event log
+rather than inventing a parallel audit trail.
+
+**Precondition honesty** — real, DB-checked conditions where the data
+model genuinely supports them, explicit human-attestation (reason
+required, already an existing admin-desk requirement) where it doesn't,
+never a fabricated automated check for something this platform can't
+actually observe (it doesn't hold money, run logistics, or clear
+customs):
+- `parties_assigned`: a real, non-removed `deal_parties` row exists.
+- `counterparties_verified`: **a genuine cross-priority integration** —
+  every party with an organization must have reached Priority 6's
+  verification level 1, checked live via
+  `resolveOrganizationVerificationLevel`.
+- `quotes_received`: a real quote exists for this deal (joined through
+  `quote_requests`).
+- `quote_accepted`: a real quote with `status:'accepted'` exists.
+- `preshipment_evidence_approved`: the deal's "Verified loading"
+  milestone (sequence 2) has `evidenceStatus:'verified'` — a documented,
+  soft name/sequence coupling, not a formal FK (milestones and workflow
+  stages aren't linked in the schema yet — a real limitation, stated
+  plainly, not hidden).
+- `payment_confirmed` onward (payment, dispatch, customs, delivery,
+  reconciliation, closing): no automated precondition exists because
+  this platform genuinely cannot observe these events — they're human
+  attestations, gated by role (payment confirmation and closing are
+  **administrator-only**, not verification_analyst, given the mission's
+  explicit "TradeSafe never holds or moves money" rule makes "an
+  administrator recorded that a licensed partner confirmed payment" a
+  materially bigger claim than routine evidence review) and the reason
+  field the admin desk already requires on every action.
+
+**A real D1 migration limitation, worked around correctly, not
+silently**: changing `deals.stage`'s column default forces drizzle-kit
+to recreate the table (SQLite can't `ALTER COLUMN ... SET DEFAULT`
+directly), and that recreate genuinely failed against D1's migration
+runner (`FOREIGN KEY constraint failed`) — confirmed by actually
+attempting it, not assumed. Rather than force a risky workaround, the
+column default stays at the old literal `"intake"` (documented in
+`db/schema.ts` as intentional, not an oversight) and
+`app/api/deals/route.ts` sets the real value (`DEAL_STAGES[0]`)
+explicitly on every insert — the default is realistically never hit.
+Existing local dev rows were normalized via a direct `UPDATE`, separate
+from the migration system, exactly like earlier local-only data cleanup
+this session (rate limit test rows, etc.).
+
+**A real client-bundle bug caught before it shipped**: the first draft
+had `app/admin/page.tsx` (`"use client"`) importing `nextStage` directly
+from `lib/deal-workflow.ts`, which also exports `attemptDealTransition`
+and pulls in `getDb`/`cloudflare:workers` at module scope — importing
+that into a browser bundle would break the client. Caught during
+inspection (not by a build failure — vinext's dev bundler didn't flag
+it), fixed by splitting the pure stage-list/adjacency logic into
+`lib/deal-stages.ts` with zero server dependencies, which
+`lib/deal-workflow.ts` now imports FROM rather than duplicating.
+Verified live: `/admin`'s Deals tab loads with zero console errors.
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (42, unchanged) ·
+**120/120 tests** (10 new: full stage-list adjacency proof,
+legacy-stage-value handling, the stage-skip block, precondition
+enforcement for parties/counterparties/quotes with real DB data,
+role-authorization for the administrator-only transition, and the
+404 case) · `build` clean.
+
+**Live browser + attack verification, not just unit tests:**
+- A real deal created through the real `/deal/new` form starts at
+  `request_confirmed` (confirmed via direct D1 query), not the old
+  `intake`.
+- **Attack**: a direct `PATCH /api/admin/desk` attempting
+  `request_confirmed` → `closed` in one call → 400, naming the actual
+  legal next stage (`parties_assigned`) in the error.
+- `parties_assigned` blocked with no real party, then succeeds
+  immediately after a real party is added through the real
+  `POST /api/deals/:id/parties` route (Priority 1).
+- `counterparties_verified` blocked with the organization at
+  verification level 0, then succeeds immediately after recording a
+  real level-1 fact through the real Priority 6 API — proving the
+  cross-priority integration works live, not just in isolated unit
+  tests of each module.
+- **Attack**: a real verification_analyst account attempting the
+  administrator-only `payment_confirmed` transition directly → 403.
+  A real administrator account performing the same transition → 200.
+- The admin UI itself, loaded fresh in a real browser: zero console
+  errors, and the Deals tab shows the real current stage plus a real,
+  server-validated "Advance to X" control.
+
+**Remaining risks, explicitly deferred:**
+- No reversal path is implemented for any transition (all `reversible`
+  flags are conservative defaults — see the file) — a stage regression
+  today requires direct database intervention. A real limitation, not
+  silently designed around.
+- Deadlines and escalation rules per transition (mission-requested
+  fields) are not modeled yet — that's Priority 8's exception-queue
+  territory, not duplicated here.
+- The `preshipment_evidence_approved` precondition's milestone coupling
+  is a documented soft assumption (sequence 2 = "Verified loading"),
+  not a formal schema link — fragile if the milestone seed ever changes
+  without updating this file too.
+- Parties recorded by contact only (no `organizationId`) can't be
+  checked against `organization_verifications` — the
+  `counterparties_verified` precondition can't verify them, and silently
+  doesn't block on them either. Documented, not hidden.
+
+**Commit:** `pending`
+
+---
+
+## Priorities 8–13
 
 Not started. Worked next, one focused commit (or a few) per priority,
 each getting its own dated section here — never marked verified without

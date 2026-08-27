@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { requireUserOrResponse, type SessionUser } from "../../../lib/auth/current-user";
 import { withIdempotency } from "../../../lib/idempotency";
 import { corridorKeyFor, getCurrentTemplate } from "../../../lib/corridor-templates";
+import { DEAL_STAGES } from "../../../lib/deal-workflow";
 import { getDb } from "../../../db";
 import { dealCosts, dealDocuments, dealEvents, deals, milestones, verificationChecks } from "../../../db/schema";
 
@@ -65,6 +66,12 @@ async function createDeal(req: Request, user: SessionUser) {
       currency: String(body.currency || "USD"),
       targetDate: String(body.targetDate || ""),
       corridorTemplateId: corridorTemplate?.id ?? null,
+      // Priority 7 (docs/production-readiness.md): explicit rather than
+      // relying on the column default (see db/schema.ts's comment on
+      // why that default is stuck at the old "intake" value) —
+      // DEAL_STAGES[0] is the actual first stage of the real state
+      // machine every deal now enters.
+      stage: DEAL_STAGES[0],
     }).returning();
 
     await db.insert(dealCosts).values({
