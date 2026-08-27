@@ -384,7 +384,135 @@ errors back to 0 before anything was committed).
 
 ---
 
-## Priorities 4–13
+## Priority 4 — Accessibility and localization
+
+**Status: implemented but partially verified.** Real, concrete defects
+were found and fixed, and what was fixed was verified live. What's
+explicitly NOT done: a WCAG 2.2 AA sweep of every page (only the core
+flows named in the spec — registration, login, opportunity discovery,
+deal rooms, disputes, notifications — were checked), screen-reader (as
+opposed to keyboard/DOM-structure) testing, and full string
+externalization for localization (a formatting *foundation* was built
+and wired into real money displays; the ~30 pages' inline English copy
+is not translated or extracted into keys).
+
+**Files changed:** `app/globals.css` (focus-visible fix), `lib/i18n/format.ts`
+(new), `app/deal/[id]/page.tsx`, `app/disputes/page.tsx`,
+`app/disputes/[id]/page.tsx`, `app/admin/page.tsx` (all wired to the new
+formatter), `tests/unit/i18n-format.test.ts` (new).
+
+**Accessibility — inspected and verified (not assumed):**
+- Checked `app/layout.tsx`: `<html lang="en">` already correct.
+- Checked every CSS file for `outline:0`/`outline:none` overrides —
+  found exactly two, both with NO `:focus-visible` replacement: the
+  homepage's country-search `<input>` and the landed-cost calculator's
+  `<input>` fields. **This was a real WCAG 2.4.7 (Focus Visible)
+  failure** — a keyboard user tabbing to either field got zero visual
+  indication of focus. Fixed with targeted `:focus-visible` overrides
+  (matching or exceeding the original rules' specificity, verified via
+  computed-style check in a real browser: outline went from `0px none`
+  to `2px solid`) plus a baseline global `:focus-visible` rule as
+  defense-in-depth for anything not explicitly styled.
+- Checked the homepage's interactive Africa map: the SVG country
+  `<path>` elements are mouse-only (not natively keyboard-focusable —
+  `<path onClick>` has no default tab stop or keyboard handler). This
+  is a real gap, but **mitigated, not blocking**: a fully equivalent,
+  already-keyboard-accessible `<button>` list of every country sits
+  right next to the map (`app/page.tsx`'s `.desk nav .list`) and drives
+  the exact same selection state — a keyboard/screen-reader user has a
+  working path to every country, just not through the visual map itself.
+  Recorded as a remaining risk below rather than silently left
+  unmentioned.
+- Grepped the whole app for `<img>` — zero occurrences (nothing to
+  alt-text; the app has no photography/logo raster images, only inline
+  SVG, which is separately checked above).
+- Playwright keyboard/landmark/labeling sweep of `/opportunities`,
+  `/deal/:id` (a real deal room, not a fixture), `/disputes`, and
+  `/notifications`: every page has a `<main>` landmark and an `<h1>`;
+  keyboard Tab reaches real, visible interactive elements (not lost to
+  `document.body`) on every page; every visible form field has an
+  accessible name (an associated `<label>`, `aria-label`, or
+  `placeholder`) — zero unlabeled fields found across all four pages.
+- Login/register skip-link fix from Priority 1 already covered those
+  two flows; not re-tested here since nothing there changed.
+
+**Localization — foundation built, explicitly not full string
+extraction:**
+- `lib/i18n/format.ts`: `formatCurrency`/`formatNumber`/`formatDateTime`
+  via `Intl`, taking an explicit locale rather than depending on the
+  server's or browser's ambient default (a deliberate choice — an SSR
+  page and its post-hydration client render disagreeing on formatting
+  is exactly the shape of bug this branch already had one serious
+  incident from, re: the CSP/hydration fix earlier this session).
+  `DEFAULT_LOCALE = "en"` is the seam later work hangs a real
+  per-request/per-user locale off of. Dates are formatted explicitly in
+  UTC — this app has no per-user timezone preference stored anywhere,
+  and every timestamp in the database is UTC, so anything else would be
+  actively misleading, not more correct.
+- Wired into every real, non-hypothetical currency display found via a
+  full-app grep of `.toLocaleString()`: deal-room landed
+  cost/profit/sale-value metrics (which — real bug found in passing —
+  were hardcoded to a literal `$` prefix regardless of the deal's actual
+  `currency` field; now genuinely currency-aware), deal-room quote
+  totals, and both dispute list/detail views' disputed-amount display.
+- Explicitly NOT touched: the homepage's illustrative landed-cost
+  calculator (`app/page.tsx`) — it has no currency selector at all (it's
+  a hypothetical USD-only estimation tool, not a per-deal transactional
+  amount), so it was left alone rather than risk a dense, already-large
+  single-line file for a lower-value change.
+- Explicitly NOT done: extracting any of the ~30 pages' hardcoded
+  English JSX copy into translation keys. That is a separate, much
+  larger effort this pass does not attempt.
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (40 total,
+unchanged) · **77/77 tests** (6 new: currency formatting with grouping,
+a real non-USD currency — KES, matching this app's existing currency
+select list — a graceful fallback on an invalid ISO code rather than a
+throw, number grouping, and UTC-explicit date formatting) · `build`
+clean.
+
+**Browser flows verified live, not just unit-tested:**
+- Computed-style check confirmed the focus-visible fix actually renders
+  a visible outline (not just correct CSS source).
+- Created a real deal with a real supplier cost
+  (`$1,234,567.50`/`$2,000,000.00`) through the actual UI form and
+  confirmed the deal room's metrics render properly grouped currency —
+  not the un-grouped/ungrouped-but-technically-correct number a naive
+  fix could have produced.
+- Seeded a real dispute with a non-USD currency (`KES`) and confirmed
+  the disputes list renders it through `Intl` (`KES 5,000.00`, the
+  actual currency code/symbol) rather than the old hardcoded pattern
+  that would technically have shown the right code but without correct
+  grouping/decimal handling for that locale.
+
+**Defects found and fixed:** the focus-visible CSS gap (real WCAG
+2.4.7 failure); the deal room's landed-cost/profit/sale-value metrics
+hardcoding `$` regardless of the deal's actual currency (a real
+correctness bug found while wiring the formatter, not a hypothetical).
+
+**Remaining risks, explicitly deferred:**
+- No screen-reader (as opposed to keyboard-DOM) testing was performed —
+  the checks above verify keyboard operability and DOM-structural
+  accessibility (landmarks, labels, focus), not what a screen reader
+  actually announces.
+- The homepage's interactive SVG country map is not independently
+  keyboard-operable (mitigated by an equivalent list, not fixed).
+- Only the flows explicitly named in the spec were checked — dozens of
+  other pages (organizations, quote-request forms specifically,
+  milestone/document upload interactions, admin desk) were not
+  independently swept.
+- No French (or any second language) support exists — `SUPPORTED_LOCALES`
+  currently has exactly one entry (`"en"`), by design, matching "keep
+  English as the initial complete language" — but no actual translation
+  work has started.
+- Color contrast was not measured with a contrast-ratio tool (no
+  automated contrast checker was run against this app's palette).
+
+**Commit:** `pending`
+
+---
+
+## Priorities 5–13
 
 Not started. Worked next, one focused commit (or a few) per priority,
 each getting its own dated section here — never marked verified without

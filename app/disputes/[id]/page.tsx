@@ -4,6 +4,7 @@ import { canParticipateInDispute, resolveDealViewAccess } from "../../../lib/aut
 import { getDb } from "../../../db";
 import { disputeEvents, disputeMessages, disputes } from "../../../db/schema";
 import DisputeMessageForm from "../../components/DisputeMessageForm";
+import { formatCurrency } from "../../../lib/i18n/format";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,7 @@ export default async function DisputeDetail({ params }: { params: Promise<{ id: 
     <section className="portalhead"><div><p>{dispute.category.replaceAll("_", " ").toUpperCase()}</p><h1>{dispute.reference}</h1><span>Deal #{dispute.dealId} · Opened by {dispute.openedByEmail}</span></div><aside><b>{dispute.status.replaceAll("_", " ")}</b><span>{dispute.priority} priority</span></aside></section>
     <section className="roomgrid">
       <article>
-        <div className="roomtitle"><small>CASE DETAILS</small><b>{dispute.disputedAmount ? `${dispute.currency} ${dispute.disputedAmount.toLocaleString()}` : "Amount not stated"}</b></div>
+        <div className="roomtitle"><small>CASE DETAILS</small><b>{dispute.disputedAmount ? formatCurrency(dispute.disputedAmount, dispute.currency) : "Amount not stated"}</b></div>
         <p>{dispute.description}</p>
         {dispute.requestedResolution && <p><b>Requested resolution:</b> {dispute.requestedResolution}</p>}
         {dispute.assignedToEmail && <p><b>Assigned to:</b> {dispute.assignedToEmail}</p>}
