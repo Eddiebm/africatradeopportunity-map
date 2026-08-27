@@ -1188,7 +1188,7 @@ number) · `build` clean, `/quote` present in the route manifest.
   scope creep into "rewriting working Phase 1–4 code" the mission
   explicitly warns against. Flagged here as a real, separate follow-up.
 
-**Commit:** `pending`
+**Commit:** `756ff5f`
 
 ---
 
