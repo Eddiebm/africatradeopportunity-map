@@ -1,28 +1,274 @@
 import { desc, eq } from "drizzle-orm";
-import { getChatGPTUser } from "../../../chatgpt-auth";
+import { requirePlatformRoleOrResponse } from "../../../../lib/auth/current-user";
+import { attemptDealTransition } from "../../../../lib/deal-workflow";
+import { notifyMilestoneEventByWhatsApp } from "../../../../lib/whatsapp-notify";
+import { logServerError, newCorrelationId } from "../../../../lib/observability";
 import { getDb } from "../../../../db";
-import { dealDocuments, deals, marketRequests, matchCandidates, verificationChecks } from "../../../../db/schema";
+import { adminAuditEvents, dealDocuments, deals, disputeEvents, disputeMessages, disputes, introductions, marketRequests, matchCandidates, milestones, organizations, verificationChecks, whatsappContacts, whatsappMessages } from "../../../../db/schema";
 
-const ADMIN="eddie@bannermanmenson.com";
-async function authorize(){const user=await getChatGPTUser();return user?.email.toLowerCase()===ADMIN?user:null}
+const REVIEWER_ROLES = ["administrator", "verification_analyst"] as const;
+const DISPUTE_PRIORITIES = ["normal", "high", "urgent"] as const;
 
-export async function GET(){
- if(!await authorize())return Response.json({error:"Administrator access required."},{status:403});
- const db=getDb();const [dealRows,requestRows,checks,documents,matches]=await Promise.all([db.select().from(deals).orderBy(desc(deals.id)).limit(100),db.select().from(marketRequests).orderBy(desc(marketRequests.id)).limit(100),db.select().from(verificationChecks).orderBy(desc(verificationChecks.id)).limit(300),db.select().from(dealDocuments).orderBy(desc(dealDocuments.id)).limit(300),db.select().from(matchCandidates).orderBy(desc(matchCandidates.createdAt)).limit(200)]);
- return Response.json({deals:dealRows,requests:requestRows,checks,documents,matches});
+// Priority 7 (docs/production-readiness.md): "deal" is deliberately NOT
+// in this map — its stage is a real 13-stage graph now
+// (lib/deal-workflow.ts), not a flat set of independently-choosable
+// values. Before this, "deal" being in here meant this route would
+// accept ANY of 9 unordered values as a valid `status` regardless of
+// the deal's current one — a reviewer could jump a brand-new deal
+// straight to "closed" in one request. See the dedicated `deal` branch
+// below, which calls attemptDealTransition() instead.
+const allowed: Record<string, string[]> = {
+  request: ["pending_verification", "contacted", "verified", "rejected"],
+  check: ["required", "submitted", "verified", "failed"],
+  document: ["required", "submitted", "approved", "rejected"],
+  match: ["awaiting_counterparty", "mutual_interest", "approved", "rejected"],
+  organization: ["reported", "under_review", "verified", "rejected"],
+  introduction: ["awaiting_consent", "pending_review", "approved", "rejected"],
+  // Evidence state only — see app/api/deals/[id]/milestones/[milestoneId]/route.ts.
+  // Marking a milestone "verified" here confirms the evidence was reviewed;
+  // it does not move money. milestones.status (proposed/etc.) is untouched
+  // by this — a licensed payment partner, not this platform, executes any
+  // actual release.
+  milestone: ["missing", "submitted", "verified"],
+  dispute: ["open", "investigating", "awaiting_response", "resolved", "closed"],
+};
+
+export async function GET(request: Request) {
+  const auth = await requirePlatformRoleOrResponse(request, [...REVIEWER_ROLES]);
+  if (auth instanceof Response) return auth;
+  const db = getDb();
+  const [dealRows, requestRows, checks, documents, matches, organizationRows, introductionRows, milestoneRows, disputeRows, disputeMessageRows, whatsappMessageRows, whatsappContactRows] = await Promise.all([
+    db.select().from(deals).orderBy(desc(deals.id)).limit(100),
+    db.select().from(marketRequests).orderBy(desc(marketRequests.id)).limit(100),
+    db.select().from(verificationChecks).orderBy(desc(verificationChecks.id)).limit(300),
+    db.select().from(dealDocuments).orderBy(desc(dealDocuments.id)).limit(300),
+    db.select().from(matchCandidates).orderBy(desc(matchCandidates.createdAt)).limit(200),
+    db.select().from(organizations).orderBy(desc(organizations.id)).limit(200),
+    db.select().from(introductions).orderBy(desc(introductions.createdAt)).limit(200),
+    db.select().from(milestones).where(eq(milestones.evidenceStatus, "submitted")).limit(200),
+    // Admin desk sees every dispute regardless of status — unlike GET
+    // /api/disputes, which only ever returns the caller's own.
+    db.select().from(disputes).orderBy(desc(disputes.id)).limit(200),
+    // Reviewers see the full thread, including internal-audience notes that
+    // the dispute opener's own view (app/disputes/page.tsx) never gets.
+    db.select().from(disputeMessages).orderBy(desc(disputeMessages.id)).limit(500),
+    // Priority 10: the real audit history the mission asks for — every
+    // inbound and outbound WhatsApp message this platform has any record
+    // of, whether or not a real provider was ever connected.
+    db.select().from(whatsappMessages).orderBy(desc(whatsappMessages.id)).limit(300),
+    db.select().from(whatsappContacts).orderBy(desc(whatsappContacts.id)).limit(300),
+  ]);
+  return Response.json({ deals: dealRows, requests: requestRows, checks, documents, matches, organizations: organizationRows, introductions: introductionRows, milestones: milestoneRows, disputes: disputeRows, disputeMessages: disputeMessageRows, whatsappMessages: whatsappMessageRows, whatsappContacts: whatsappContactRows });
 }
 
-export async function PATCH(req:Request){
- if(!await authorize())return Response.json({error:"Administrator access required."},{status:403});
- const body=await req.json() as {entity?:string;id?:number;status?:string};const numericId=Number(body.id);const status=String(body.status||"");
- if(!numericId||!body.entity)return Response.json({error:"Invalid record."},{status:400});
- const allowed:Record<string,string[]>={request:["pending_verification","contacted","verified","rejected"],deal:["intake","investigating","quoted","matched","contracting","in_transit","delivered","closed","rejected"],check:["required","submitted","verified","failed"],document:["required","submitted","approved","rejected"],match:["awaiting_counterparty","mutual_interest","approved","rejected"]};
- if(!allowed[body.entity]?.includes(status))return Response.json({error:"Invalid status."},{status:400});
- const db=getDb();
- if(body.entity==="request")await db.update(marketRequests).set({status}).where(eq(marketRequests.id,numericId));
- if(body.entity==="deal")await db.update(deals).set({stage:status,updatedAt:new Date().toISOString()}).where(eq(deals.id,numericId));
- if(body.entity==="check")await db.update(verificationChecks).set({status,reviewerEmail:ADMIN,checkedAt:new Date().toISOString()}).where(eq(verificationChecks.id,numericId));
- if(body.entity==="document")await db.update(dealDocuments).set({status,reviewedBy:ADMIN,reviewedAt:new Date().toISOString()}).where(eq(dealDocuments.id,numericId));
- if(body.entity==="match")await db.update(matchCandidates).set({status,updatedAt:new Date().toISOString()}).where(eq(matchCandidates.demandRequestId,numericId));
- return Response.json({ok:true});
+export async function PATCH(request: Request) {
+  const auth = await requirePlatformRoleOrResponse(request, [...REVIEWER_ROLES]);
+  if (auth instanceof Response) return auth;
+  const admin = auth;
+
+  let body: {
+    entity?: string;
+    id?: number | string;
+    status?: string;
+    reason?: string;
+    // dispute entity only — see the `dispute` branch below.
+    resolutionSummary?: string;
+    assignedToEmail?: string;
+    priority?: string;
+  };
+  try {
+    body = (await request.json()) as typeof body;
+  } catch {
+    return Response.json({ error: "Invalid request body." }, { status: 400 });
+  }
+  const status = String(body.status || "");
+  const reason = String(body.reason || "").trim();
+
+  if (!body.entity) return Response.json({ error: "Invalid record." }, { status: 400 });
+  if (!reason) return Response.json({ error: "A reason is required for this decision." }, { status: 400 });
+
+  // Priority 7: deal-stage transitions go through the real state machine
+  // (lib/deal-workflow.ts), not the flat allowed[]-membership check below
+  // — that check can only ever say "is this status one of N values,"
+  // never "is this the actual next stage from where the deal is now,"
+  // which is the entire point of this fix.
+  if (body.entity === "deal") {
+    const dealId = Number(body.id);
+    if (!dealId) return Response.json({ error: "Invalid record." }, { status: 400 });
+    const result = await attemptDealTransition(dealId, status, admin, reason);
+    if (!result.ok) return Response.json({ error: result.error }, { status: result.status });
+    await getDb().insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "deal", entityId: dealId, fromStatus: result.fromStage, toStatus: status, reason });
+    return Response.json({ ok: true, deal: result.deal });
+  }
+
+  if (!allowed[body.entity]) return Response.json({ error: "Invalid record." }, { status: 400 });
+  if (!allowed[body.entity].includes(status)) return Response.json({ error: "Invalid status." }, { status: 400 });
+
+  const db = getDb();
+
+  // introductions.id is also a text primary key (e.g. "I-M-12-7"), same
+  // reason as matchCandidates below — never coerced through numericId.
+  if (body.entity === "introduction") {
+    const introId = String(body.id ?? "").trim();
+    if (!introId) return Response.json({ error: "Invalid record." }, { status: 400 });
+    const [row] = await db.select().from(introductions).where(eq(introductions.id, introId)).limit(1);
+    if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
+    const now = new Date().toISOString();
+    const isApproval = status === "approved";
+    await db
+      .update(introductions)
+      .set({
+        status,
+        updatedAt: now,
+        ...(isApproval ? { approvedBy: admin.email, approvedAt: now, contactReleasedAt: now } : {}),
+      })
+      .where(eq(introductions.id, introId));
+    await db.insert(adminAuditEvents).values({
+      actorUserId: admin.id,
+      action: "status_change",
+      entityType: "introduction",
+      // Same integer-only entityId constraint as the match branch below —
+      // logging the demand organization id as the closest available FK.
+      entityId: row.demandOrganizationId,
+      fromStatus: row.status,
+      toStatus: status,
+      reason,
+    });
+    return Response.json({ ok: true });
+  }
+
+  // matchCandidates.id is a text primary key (e.g. "M-12-7"), not a numeric
+  // row id — it must never be coerced through Number()/numericId, unlike
+  // every other entity type handled below. See docs/AUDIT.md §3.
+  if (body.entity === "match") {
+    const matchId = String(body.id ?? "").trim();
+    if (!matchId) return Response.json({ error: "Invalid record." }, { status: 400 });
+    const [row] = await db.select().from(matchCandidates).where(eq(matchCandidates.id, matchId)).limit(1);
+    if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
+    await db.update(matchCandidates).set({ status, updatedAt: new Date().toISOString() }).where(eq(matchCandidates.id, matchId));
+    await db.insert(adminAuditEvents).values({
+      actorUserId: admin.id,
+      action: "status_change",
+      entityType: "match",
+      // adminAuditEvents.entityId is integer-only; the match's real id is
+      // the text id above (already used for the update's WHERE clause).
+      // We log the demand request id here as the closest available
+      // integer FK — see final report for the Phase 2 follow-up this implies.
+      entityId: row.demandRequestId,
+      fromStatus: row.status,
+      toStatus: status,
+      reason,
+    });
+    return Response.json({ ok: true });
+  }
+
+  const numericId = Number(body.id);
+  if (!numericId) return Response.json({ error: "Invalid record." }, { status: 400 });
+
+  if (body.entity === "request") {
+    const [row] = await db.select().from(marketRequests).where(eq(marketRequests.id, numericId)).limit(1);
+    if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
+    await db.update(marketRequests).set({ status }).where(eq(marketRequests.id, numericId));
+    await db.insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "request", entityId: numericId, fromStatus: row.status, toStatus: status, reason });
+  } else if (body.entity === "deal") {
+    const [row] = await db.select().from(deals).where(eq(deals.id, numericId)).limit(1);
+    if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
+    await db.update(deals).set({ stage: status, updatedAt: new Date().toISOString() }).where(eq(deals.id, numericId));
+    await db.insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "deal", entityId: numericId, fromStatus: row.stage, toStatus: status, reason });
+  } else if (body.entity === "check") {
+    const [row] = await db.select().from(verificationChecks).where(eq(verificationChecks.id, numericId)).limit(1);
+    if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
+    await db.update(verificationChecks).set({ status, reviewerEmail: admin.email, checkedAt: new Date().toISOString() }).where(eq(verificationChecks.id, numericId));
+    await db.insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "check", entityId: numericId, fromStatus: row.status, toStatus: status, reason });
+  } else if (body.entity === "document") {
+    const [row] = await db.select().from(dealDocuments).where(eq(dealDocuments.id, numericId)).limit(1);
+    if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
+    await db.update(dealDocuments).set({ status, reviewedBy: admin.email, reviewedAt: new Date().toISOString() }).where(eq(dealDocuments.id, numericId));
+    await db.insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "document", entityId: numericId, fromStatus: row.status, toStatus: status, reason });
+  } else if (body.entity === "organization") {
+    const [row] = await db.select().from(organizations).where(eq(organizations.id, numericId)).limit(1);
+    if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
+    await db.update(organizations).set({ verificationStatus: status }).where(eq(organizations.id, numericId));
+    await db.insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "organization", entityId: numericId, fromStatus: row.verificationStatus, toStatus: status, reason });
+  } else if (body.entity === "milestone") {
+    const [row] = await db.select().from(milestones).where(eq(milestones.id, numericId)).limit(1);
+    if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
+    await db.update(milestones).set({ evidenceStatus: status }).where(eq(milestones.id, numericId));
+    await db.insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "milestone", entityId: numericId, fromStatus: row.evidenceStatus, toStatus: status, reason });
+    // Priority 10 (docs/production-readiness.md): "milestone notifications"
+    // — the first and only real trigger wired to lib/whatsapp-notify.ts.
+    // Purely additive: no-ops silently (returns {sent:false}) for every
+    // deal owner who hasn't linked an opted-in WhatsApp number, which is
+    // every deal owner in this environment today (no real provider is
+    // connected either — see lib/whatsapp.ts). Never blocks or fails the
+    // actual milestone review if the notification attempt has any issue.
+    if (status === "verified" || status === "missing") {
+      const [deal] = await db.select().from(deals).where(eq(deals.id, row.dealId)).limit(1);
+      if (deal) {
+        await notifyMilestoneEventByWhatsApp({
+          dealId: deal.id,
+          dealReference: deal.reference,
+          milestoneName: row.name,
+          summary: status === "verified" ? "evidence verified" : "evidence sent back — resubmission needed",
+          ownerEmail: deal.ownerEmail,
+        }).catch((error) => logServerError(newCorrelationId(), { method: "PATCH", pathname: "/api/admin/desk#milestone-notify" }, error));
+      }
+    }
+  } else if (body.entity === "dispute") {
+    const [row] = await db.select().from(disputes).where(eq(disputes.id, numericId)).limit(1);
+    if (!row) return Response.json({ error: "Invalid record." }, { status: 400 });
+
+    // Resolving without a summary would be a status flip nobody can act on
+    // later — required specifically (and only) for this transition.
+    let resolutionSummary = "";
+    if (status === "resolved") {
+      resolutionSummary = String(body.resolutionSummary || "").trim();
+      if (!resolutionSummary) return Response.json({ error: "A resolution summary is required to resolve a dispute." }, { status: 400 });
+    }
+
+    // Assignment and priority are plain optional field updates alongside the
+    // required status transition — e.g. "assign to self" sends the current
+    // status back unchanged plus assignedToEmail, still gated on a reason
+    // like every other decision here.
+    const assignedToEmail = typeof body.assignedToEmail === "string" ? body.assignedToEmail.trim() : undefined;
+    const priorityRaw = typeof body.priority === "string" ? body.priority.trim() : undefined;
+    if (priorityRaw !== undefined && !DISPUTE_PRIORITIES.includes(priorityRaw as (typeof DISPUTE_PRIORITIES)[number])) {
+      return Response.json({ error: "Invalid priority." }, { status: 400 });
+    }
+
+    const now = new Date().toISOString();
+    await db
+      .update(disputes)
+      .set({
+        status,
+        updatedAt: now,
+        ...(status === "resolved" ? { resolvedAt: now, resolutionSummary } : {}),
+        ...(assignedToEmail !== undefined ? { assignedToEmail } : {}),
+        ...(priorityRaw !== undefined ? { priority: priorityRaw } : {}),
+      })
+      .where(eq(disputes.id, numericId));
+
+    await db.insert(adminAuditEvents).values({ actorUserId: admin.id, action: "status_change", entityType: "dispute", entityId: numericId, fromStatus: row.status, toStatus: status, reason });
+
+    // disputeEvents is the status-change log the parties/reviewers see on
+    // the dispute thread (GET /api/disputes/[id]) — adminAuditEvents above
+    // is the platform-authority record, kept in addition to this, not
+    // instead of it (see db/schema.ts's comment on adminAuditEvents).
+    const assignmentChanged = assignedToEmail !== undefined && assignedToEmail !== row.assignedToEmail;
+    let summary = reason;
+    if (assignmentChanged) summary = `Assigned to ${assignedToEmail || "(unassigned)"}. ${reason}`;
+    else if (priorityRaw !== undefined && priorityRaw !== row.priority) summary = `Priority set to ${priorityRaw}. ${reason}`;
+    await db.insert(disputeEvents).values({
+      disputeId: numericId,
+      actorEmail: admin.email,
+      eventType: status === "resolved" ? "resolved" : assignmentChanged ? "assigned" : "status_change",
+      fromStatus: row.status,
+      toStatus: status,
+      summary,
+    });
+  } else {
+    return Response.json({ error: "Invalid record." }, { status: 400 });
+  }
+
+  return Response.json({ ok: true });
 }

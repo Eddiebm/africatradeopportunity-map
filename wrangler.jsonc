@@ -1,0 +1,88 @@
+{
+  // Cloudflare Workers configuration for TradeSafe Africa.
+  //
+  // This file replaces the OpenAI-Sites-specific `.openai/hosting.json`
+  // lookup that vite.config.ts previously depended on. It is read directly
+  // by `@cloudflare/vite-plugin` (via vinext) for local dev/build, and by
+  // `wrangler` / `vinext deploy` for preview and production deploys.
+  //
+  // Deploy status (see docs/DEPLOYMENT.md):
+  //   1. done  — real D1 database "tradesafe-africa-db" created, all 19
+  //      drizzle/*.sql migrations applied (39 tables, verified to match
+  //      local dev schema exactly), database_id below is real.
+  //   2. done  — real R2 bucket "tradesafe-africa-documents" created.
+  //   3. NOT done — `wrangler secret put SESSION_SECRET` (and any real
+  //      email/WhatsApp-provider keys) still needs to be run against the
+  //      real account before the Worker can serve traffic safely.
+  //   4. NOT done — the actual Worker script has not been pushed
+  //      (`wrangler deploy` / `vinext deploy`) — this requires CLI
+  //      credentials (CLOUDFLARE_API_TOKEN + account ID) that were not
+  //      available when the D1/R2 resources above were provisioned via
+  //      the Cloudflare Developer Platform MCP connector, which has no
+  //      worker-code deploy tool.
+  //   5. done (production-hardening audit follow-up) — real preview D1
+  //      "tradesafe-africa-db-preview" and R2 bucket
+  //      "tradesafe-africa-documents-preview" provisioned; env.preview
+  //      below no longer points at the placeholder database_id, so a
+  //      preview deploy is now genuinely isolated from production data
+  //      rather than one placeholder ID away from accidentally sharing
+  //      it. Migrations applied to the new preview database. Still NOT
+  //      done: `wrangler secret put SESSION_SECRET --env preview`
+  //      against the real account.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tradesafe-africa",
+  "main": "./worker/index.ts",
+  // Pinned to the newest date this repo's pinned wrangler/workerd
+  // (package.json: wrangler 4.92.0) actually supports locally. Bump this
+  // when you upgrade wrangler — `wrangler dev` refuses to start against a
+  // compatibility_date newer than its bundled runtime.
+  "compatibility_date": "2026-05-22",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "tradesafe-africa-db",
+      "database_id": "d0ab7ce4-70c4-4b17-81df-30ff69e00b20",
+      "migrations_dir": "drizzle"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "tradesafe-africa-documents"
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  },
+
+  // Refreshes db/schema.ts's intelligenceWatchlist (see
+  // lib/trade-intelligence.ts) — daily is plenty; UN Comtrade/World Bank
+  // data doesn't change intraday, and staying well under free-tier rate
+  // limits matters more than freshness here.
+  "triggers": {
+    "crons": ["0 3 * * *"]
+  },
+
+  "env": {
+    "preview": {
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "tradesafe-africa-db-preview",
+          "database_id": "cbe20531-d9ed-4d16-8ee8-9e9c9a82067a",
+          "migrations_dir": "drizzle"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "BUCKET",
+          "bucket_name": "tradesafe-africa-documents-preview"
+        }
+      ]
+    }
+  }
+}

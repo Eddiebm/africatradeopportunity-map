@@ -1,0 +1,36 @@
+# Copy this file to .dev.vars (gitignored) for local `vinext dev` / `wrangler dev`.
+# In every real environment these are set with `wrangler secret put <NAME>`,
+# never committed. See docs/DEPLOYMENT.md.
+
+# HMAC key signing the session cookie. Generate one with:
+#   openssl rand -base64 32
+SESSION_SECRET=replace-with-a-random-32-byte-base64-value
+
+# Cloudflare Turnstile secret key (server-side), used to verify CAPTCHA
+# tokens submitted by public forms (registration, market-request posting).
+# Get a real one at dash.cloudflare.com -> Turnstile -> add a widget ->
+# copy the "Secret Key" (the "Site Key" is separate and public — that one
+# is NEXT_PUBLIC_TURNSTILE_SITE_KEY, a build-time client var, not a
+# .dev.vars secret; see lib/turnstile.ts).
+# Defaults to unset/empty locally: with no key configured, verification is
+# honestly reported as "not checked" (never faked as passed) and is not
+# enforced as a hard rejection outside of production builds — see
+# lib/turnstile.ts's turnstileEnforced() for the exact fail-open/closed rule.
+TURNSTILE_SECRET_KEY=
+
+# Priority 10: shared secret the inbound WhatsApp webhook checks against a
+# request header before trusting the payload. No real WhatsApp Business
+# API provider is connected in this environment — see lib/whatsapp.ts's
+# header for the full stopping-condition note. Leave unset locally; the
+# webhook still processes requests (documented, not silently faked as
+# "verified") but logs plainly that no secret was configured.
+WHATSAPP_WEBHOOK_SECRET=
+
+# Production-hardening audit follow-up (Phase 6 — release safety): kill
+# switch for real outbound WhatsApp sends, checked in
+# lib/whatsapp.ts's getWhatsAppProvider(). No real provider is connected
+# yet (only ConsoleWhatsAppProvider exists), so this has no effect today —
+# it exists so that whenever a real provider IS wired in, an operator can
+# stop real sends immediately (mid-incident, no redeploy) by setting this
+# to exactly "false". Leave unset (default: enabled).
+WHATSAPP_SENDS_ENABLED=
