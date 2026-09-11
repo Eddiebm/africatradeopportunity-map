@@ -12,7 +12,7 @@
 // deal creation, never updated by any route), there is deliberately no
 // detector — see docs/production-readiness.md's Priority 8 section for
 // that explicit, intentional deferral rather than a fabricated one.
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { getDb } from "../db";
 import {
   deals,
@@ -313,7 +313,22 @@ async function detectHighRiskDeals(): Promise<DetectedCondition[]> {
     const idx = stageIndex(deal.stage);
     if (idx === -1 || deal.stage === "closed") continue;
 
-    if (costs.supplierCost >= HIGH_VALUE_DEAL_USD) {
+    // FIX (production-hardening audit, PR review finding): HIGH_VALUE_DEAL_USD
+    // is, as its name says, a USD figure — but this used to compare it
+    // directly against costs.supplierCost regardless of deal.currency.
+    // 250,000 NGN (worth a small fraction of $250,000) tripped this
+    // exception; a genuinely high-value deal quoted in a currency with
+    // larger nominal units could just as easily be missed. This app has
+    // no live FX rate source anywhere (confirmed by inspection — the
+    // same reason no "material landed-cost change" detector exists,
+    // see this file's own header), so converting correctly isn't
+    // possible without fabricating an exchange rate — the one thing
+    // this codebase's own conventions rule out everywhere else. The
+    // honest fix is to only apply this specific threshold to deals
+    // actually denominated in USD, not to guess at a rate for the
+    // others; a currency-aware version of this detector is real,
+    // deferred work, not a shortcut.
+    if (deal.currency === "USD" && costs.supplierCost >= HIGH_VALUE_DEAL_USD) {
       out.push({
         exceptionType: "high_value_deal",
         severity: "medium",
@@ -352,7 +367,17 @@ async function detectHighRiskDeals(): Promise<DetectedCondition[]> {
     // superseded by a failed re-check doesn't retroactively block a deal
     // that already passed that gate — this is the ongoing check for that.
     if (idx > counterpartiesVerifiedIdx) {
-      const parties = await db.select().from(dealParties).where(and(eq(dealParties.dealId, deal.id), isNotNull(dealParties.organizationId)));
+      // FIX (production-hardening audit, PR review finding): missing the
+      // same `removedAt IS NULL` predicate every other deal-access/
+      // transition check in this codebase already applies (see
+      // lib/auth/deal-access.ts's resolveDealViewAccess,
+      // lib/deal-workflow.ts's counterparties_verified precondition) —
+      // a party removed from the deal (app/api/deals/[id]/parties/route.ts
+      // DELETE) still had their organization's verification level
+      // evaluated here, so a removed and unverified organization could
+      // create or keep a critical exception for a deal it no longer has
+      // any real relationship to.
+      const parties = await db.select().from(dealParties).where(and(eq(dealParties.dealId, deal.id), isNotNull(dealParties.organizationId), isNull(dealParties.removedAt)));
       for (const party of parties) {
         if (!party.organizationId) continue;
         const { level } = await resolveOrganizationVerificationLevel(party.organizationId);

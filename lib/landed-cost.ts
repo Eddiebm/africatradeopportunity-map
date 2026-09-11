@@ -100,8 +100,32 @@ export async function getLandedCostBreakdown(dealId: number): Promise<LandedCost
     if (!estimate && !actual) continue;
 
     if (estimate?.isExcluded) {
-      excluded.push(estimate);
-      continue; // excluded components never enter the totals
+      // FIX (production-hardening audit, PR review finding): an
+      // excluded estimate (e.g. insurance/brokerage never collected at
+      // intake) used to `continue` unconditionally here — if the owner
+      // later recorded a REAL actual for that same component (real
+      // money genuinely paid, via the UI form this breakdown itself
+      // renders), it silently vanished: never shown, never counted in
+      // actualTotal, with no error and no way to tell it had happened
+      // short of a direct database read. A real actual must never be
+      // dropped. The estimate itself is still excluded (there never was
+      // a real quantitative estimate — passing the excluded row's own
+      // $0 placeholder as `estimate` here would misreport "not
+      // collected" as "estimated at $0"), so it's surfaced with
+      // estimate:null — an actual with no estimate to compare against,
+      // not a fabricated variance. Once a real actual exists, this
+      // component no longer belongs in `excluded` either — showing it
+      // both as "NOT YET ESTIMATED" and as a real recorded actual in
+      // the same breakdown would be self-contradictory, not just
+      // incomplete.
+      if (!actual) {
+        excluded.push(estimate);
+        continue;
+      }
+      anyComponent = true;
+      components.push({ componentType, estimate: null, actual, variance: null });
+      actualTotal += actual.expectedAmount;
+      continue;
     }
 
     anyComponent = true;

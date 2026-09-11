@@ -77,6 +77,46 @@ describe("lib/landed-cost", () => {
     expect(insuranceComponent).toBeDefined();
   });
 
+  it("FIX (production-hardening audit, PR review finding): a real actual recorded for a previously-EXCLUDED component is never dropped", async () => {
+    const deal = await makeDeal("owner2b@example.com");
+    await seedLandedCostFromDealIntake({
+      dealId: deal.id, currency: "USD", recordedByEmail: "owner2b@example.com",
+      supplierCost: 1000, freight: 0, borderTaxes: 0, financeFx: 0,
+      insuranceCollected: false, inspectionCollected: false, insurance: 0, inspection: 0,
+    });
+    // Confirm the pre-condition: insurance starts genuinely excluded.
+    let breakdown = await getLandedCostBreakdown(deal.id);
+    expect(breakdown.excluded.some((e) => e.componentType === "insurance")).toBe(true);
+    expect(breakdown.components.some((c) => c.componentType === "insurance")).toBe(false);
+
+    // The owner later pays a real insurance premium and records it.
+    await recordLandedCostEntry({ dealId: deal.id, componentType: "insurance", phase: "actual", expectedAmount: 42, source: "Paid insurance invoice #7", recordedByEmail: "owner2b@example.com" });
+    breakdown = await getLandedCostBreakdown(deal.id);
+
+    const insurance = breakdown.components.find((c) => c.componentType === "insurance");
+    expect(insurance).toBeDefined(); // no longer silently missing
+    expect(insurance?.actual?.expectedAmount).toBe(42);
+    expect(insurance?.estimate).toBeNull(); // honest: there never was a real estimate, not a fabricated $0 one
+    expect(insurance?.variance).toBeNull(); // nothing to compare a real actual against
+    // actualTotal itself stays null here — a separate, pre-existing
+    // invariant (unrelated to this fix) only reports a total once EVERY
+    // non-excluded component has a recorded actual, and this deal's other
+    // components (goods/transport/duties_taxes/financing/tradesafe_fees)
+    // don't have one yet. Confirmed below: once they do, the insurance
+    // actual this fix concerns is genuinely included in that total, not
+    // dropped.
+    expect(breakdown.actualTotal).toBeNull();
+    // No longer double-listed as "not yet estimated" once a real actual
+    // exists for it — that would contradict the actual shown above.
+    expect(breakdown.excluded.some((e) => e.componentType === "insurance")).toBe(false);
+
+    for (const componentType of ["goods", "transport", "duties_taxes", "financing", "tradesafe_fees"] as const) {
+      await recordLandedCostEntry({ dealId: deal.id, componentType, phase: "actual", expectedAmount: 1, source: "test-filled actual", recordedByEmail: "owner2b@example.com" });
+    }
+    breakdown = await getLandedCostBreakdown(deal.id);
+    expect(breakdown.actualTotal).toBe(1 + 1 + 1 + 1 + 1 + 42); // the insurance actual is genuinely counted, not dropped
+  });
+
   it("tradesafe_fees is seeded honestly at $0 high confidence — a real fact (no fee schedule exists), not a guess", async () => {
     const deal = await makeDeal("owner3@example.com");
     await seedLandedCostFromDealIntake({
@@ -186,5 +226,25 @@ describe("app/api/deals/[id]/landed-cost route", () => {
     const get = await landedCostGet(req(`http://localhost/api/deals/${deal.id}/landed-cost`, undefined, cookieValue), { params: Promise.resolve({ id: String(deal.id) }) });
     const body = (await get.json()) as { components: { componentType: string; estimate: { expectedAmount: number } | null }[] };
     expect(body.components.find((c) => c.componentType === "inspection")?.estimate?.expectedAmount).toBe(250);
+  });
+
+  it("FIX (production-hardening audit, PR review finding): currency is derived server-side from the deal, never trusted from the client", async () => {
+    const ownerId = await makeUser("owner11@example.com");
+    const db = getDb();
+    const [kesDeal] = await db.insert(deals).values({ reference: `DEAL-${crypto.randomUUID()}`, ownerEmail: "owner11@example.com", requestType: "buy", product: "Maize", origin: "Kenya", destination: "Uganda", stage: "request_confirmed", currency: "KES" }).returning();
+    const { cookieValue } = await createSession(ownerId, {});
+    // Attacker/buggy-client case: the request body claims EUR, but the
+    // real deal is KES. Before this fix, this exact request stored the
+    // entry as USD (lib/landed-cost.ts's own hardcoded fallback) — never
+    // even respecting the forged value, just silently wrong in a
+    // different way. Either way, nothing the client sends should decide
+    // the stored currency.
+    const post = await landedCostPost(
+      req(`http://localhost/api/deals/${kesDeal.id}/landed-cost`, { componentType: "goods", phase: "actual", expectedAmount: 500, source: "Paid invoice #99", currency: "EUR" }, cookieValue),
+      { params: Promise.resolve({ id: String(kesDeal.id) }) },
+    );
+    expect(post.status).toBe(201);
+    const [stored] = await db.select().from(landedCostEntries).where(eq(landedCostEntries.dealId, kesDeal.id));
+    expect(stored.currency).toBe("KES"); // the deal's real currency — not "EUR" (client-forged) and not "USD" (the old silent default)
   });
 });

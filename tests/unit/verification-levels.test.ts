@@ -94,6 +94,26 @@ describe("lib/verification-levels resolveOrganizationVerificationLevel", () => {
     const { level } = await resolveOrganizationVerificationLevel(orgId);
     expect(level).toBe(1); // current state (passed) is what counts
   });
+
+  it("FIX (production-hardening audit, PR review finding): a LATER failed/pending re-check overrides an EARLIER passed fact for the same level", async () => {
+    const orgId = await makeOrg();
+    const common = { organizationId: orgId, levelKey: "identity" as const, whatWasChecked: "x", performedByEmail: "a@example.com", source: "s", reviewerEmail: "r@example.com", humanReviewRequired: false };
+    await recordOrganizationVerification({ ...common, result: "passed" });
+    let { level } = await resolveOrganizationVerificationLevel(orgId);
+    expect(level).toBe(1); // control: passed fact counts
+
+    // A later re-check for the SAME level comes back failed — the org
+    // must stop counting as verified at this level immediately, not
+    // keep riding the older passed row (which is exactly what would let
+    // it wrongly clear the counterparties_verified workflow gate,
+    // lib/deal-workflow.ts, while actually failing re-verification).
+    await recordOrganizationVerification({ ...common, result: "failed" });
+    ({ level } = await resolveOrganizationVerificationLevel(orgId));
+    expect(level).toBe(0);
+
+    const all = await getDb().select().from(organizationVerifications);
+    expect(all.filter((r) => r.organizationId === orgId).length).toBe(2); // both rows still preserved — append-only history intact
+  });
 });
 
 describe("lib/verification-levels recommendVerificationLevel", () => {

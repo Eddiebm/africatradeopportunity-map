@@ -174,6 +174,19 @@ describe("lib/exceptions syncExceptionQueue", () => {
     expect(result.created).toBe(0);
   });
 
+  it("FIX (production-hardening audit, PR review finding): a non-USD deal's supplierCost is never compared against the USD threshold as if it were dollars", async () => {
+    // HIGH_VALUE_DEAL_USD (250,000) worth of NGN is nowhere near a real
+    // $250,000 — before this fix, this raised a false high_value_deal
+    // exception purely because the raw number cleared the threshold,
+    // regardless of currency.
+    const deal = await makeDeal({ currency: "NGN" });
+    await getDb().update(dealCosts).set({ supplierCost: HIGH_VALUE_DEAL_USD }).where(eq(dealCosts.dealId, deal.id));
+    const result = await syncExceptionQueue();
+    const rows = await getDb().select().from(exceptions).where(eq(exceptions.dealId, deal.id));
+    expect(rows.some((r) => r.exceptionType === "high_value_deal")).toBe(false);
+    expect(result.created).toBe(0);
+  });
+
   it("a real cross-priority integration: a deal already past counterparties_verified whose party's org verification has since dropped below level 1 is flagged CRITICAL", async () => {
     const org = await makeOrg();
     const deal = await makeDeal({ stage: "quotes_received" }); // already past counterparties_verified
@@ -191,6 +204,28 @@ describe("lib/exceptions syncExceptionQueue", () => {
     expect(second.autoResolved).toBeGreaterThanOrEqual(1);
     const after = await getDb().select().from(exceptions).where(eq(exceptions.dealId, deal.id));
     expect(after.some((r) => r.severity === "critical" && r.status === "open")).toBe(false);
+  });
+
+  it("FIX (production-hardening audit, PR review finding): a REMOVED party's organization never triggers/keeps a verification_regression exception for that deal", async () => {
+    const org = await makeOrg();
+    const deal = await makeDeal({ stage: "quotes_received" }); // already past counterparties_verified
+    const [party] = await getDb().insert(dealParties).values({ dealId: deal.id, organizationId: org.id, role: "supplier" }).returning();
+
+    // Control: while still an active party with an unverified org, the
+    // regression IS raised (same case as the existing test above).
+    let result = await syncExceptionQueue();
+    expect(result.created).toBeGreaterThanOrEqual(1);
+    let rows = await getDb().select().from(exceptions).where(eq(exceptions.dealId, deal.id));
+    expect(rows.some((r) => r.severity === "critical" && r.exceptionType === "verification_regression")).toBe(true);
+
+    // Now remove the party from the deal — it no longer has any real
+    // relationship to this transaction.
+    await getDb().update(dealParties).set({ removedAt: new Date().toISOString() }).where(eq(dealParties.id, party.id));
+    result = await syncExceptionQueue();
+    rows = await getDb().select().from(exceptions).where(eq(exceptions.dealId, deal.id));
+    // The regression must not be freshly re-created for a removed party...
+    const openCritical = rows.filter((r) => r.severity === "critical" && r.exceptionType === "verification_regression" && r.status === "open");
+    expect(openCritical.length).toBe(0);
   });
 
   it("a dispute past its real responseDueAt is flagged; one with no responseDueAt is not", async () => {

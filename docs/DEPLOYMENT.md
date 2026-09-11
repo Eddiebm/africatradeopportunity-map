@@ -228,6 +228,27 @@ Priority 3.
 | Secret | Set with | Used by |
 |---|---|---|
 | `SESSION_SECRET` | `wrangler secret put SESSION_SECRET` | `lib/auth/session.ts` — signs the session cookie |
+| `TURNSTILE_SECRET_KEY` | `wrangler secret put TURNSTILE_SECRET_KEY` | `lib/turnstile.ts` — server-side CAPTCHA verification for `/register` and `/api/market-requests` |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | build-time env var (not a Worker secret — see below) | Same two forms — renders the actual widget client-side |
+
+**⚠️ Production-hardening audit follow-up (PR review finding): Turnstile
+is a hard go-live blocker, not an optional nice-to-have — read this
+before the first real production deploy.** `lib/turnstile.ts`'s
+`turnstileEnforced()` is fail-closed by design once `NODE_ENV ===
+"production"` (the correct, intentional behavior — it's what stops a
+forgotten secret from silently disabling anti-abuse protection, the same
+"forgetting a secret must fail safe, not fail open" discipline this app
+applies everywhere else). The real consequence, stated plainly: **if
+`TURNSTILE_SECRET_KEY` is not set before the first production deploy,
+`POST /register` and `POST /api/market-requests` will return 400 for
+every real visitor**, not just bots — because `verifyTurnstile()` has no
+key to check a token against, `turnstileEnforced()` still requires a real
+pass in production, and no request can satisfy that. This must be set —
+and `NEXT_PUBLIC_TURNSTILE_SITE_KEY` provided as a build-time env var so
+the client widget actually renders a token to submit — as part of the
+SAME go-live checklist as `SESSION_SECRET`, not a follow-up task. Get
+both at dash.cloudflare.com → Turnstile → add a widget (see
+`lib/turnstile.ts`'s own header comment for exactly which key is which).
 
 No payment, identity-verification, or email-provider credentials are
 wired yet (see `lib/email.ts` and `docs/AUDIT.md`) — connecting a real

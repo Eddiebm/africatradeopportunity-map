@@ -2,7 +2,7 @@
 // verification levels" + "Create a rules engine that recommends the
 // required verification level." See db/schema.ts's organizationVerifications
 // table header for the data model this reads/writes.
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { organizationVerifications, VERIFICATION_LEVELS, type VerificationLevelKey } from "../db/schema";
 import type { CorridorTier } from "./corridor-templates";
@@ -15,14 +15,33 @@ import type { CorridorTier } from "./corridor-templates";
  * the table — that row just doesn't count toward anything until the gap
  * is closed, matching "verification levels" as a real progression rather
  * than a checklist of unrelated facts.
+ *
+ * FIX (production-hardening audit, PR review finding): this table is
+ * append-only (a re-check is a new row, never an UPDATE — see this
+ * table's header in db/schema.ts). The old version of this function
+ * asked "does ANY row for this level say passed", which meant an old
+ * passed row kept counting forever even after a LATER re-check for the
+ * same level came back failed or pending — an organization could stay
+ * publicly "verified" at a level it had actually since failed
+ * re-verification on. Only the newest row per level should ever decide
+ * whether that level currently counts.
  */
 export async function resolveOrganizationVerificationLevel(organizationId: number): Promise<{ level: number; achievedKeys: VerificationLevelKey[] }> {
   const db = getDb();
-  const rows = await db.select().from(organizationVerifications).where(eq(organizationVerifications.organizationId, organizationId));
+  const rows = await db
+    .select()
+    .from(organizationVerifications)
+    .where(eq(organizationVerifications.organizationId, organizationId))
+    .orderBy(desc(organizationVerifications.id)); // id, not createdAt: reliable monotonic order for an append-only table even if two rows share a timestamp
+
+  const latestByLevel = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    if (!latestByLevel.has(row.levelKey)) latestByLevel.set(row.levelKey, row); // first seen per level = newest, given the ORDER BY
+  }
 
   const now = Date.now();
   const passedKeys = new Set(
-    rows
+    [...latestByLevel.values()]
       .filter((r) => r.result === "passed" && !r.humanReviewRequired && (!r.expiresAt || new Date(r.expiresAt).getTime() > now))
       .map((r) => r.levelKey),
   );

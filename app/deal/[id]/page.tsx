@@ -55,7 +55,21 @@ export default async function DealRoom({ params }: { params: Promise<{ id: strin
   // and expiry genuinely needs the real wall-clock time on every render.
   // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
-  const acceptedQuote = dealQuotes.find((q) => q.status === "accepted" && new Date(q.validUntil).getTime() > now);
+  // FIX (production-hardening audit, PR review finding): a quote's
+  // `currency` is free text the counterparty types when submitting it
+  // (app/api/quote-requests/[id]/quotes/route.ts) — never validated
+  // against the deal's own `deal.currency`. Every figure below is
+  // rendered via formatCurrency(value, deal.currency); treating an
+  // accepted quote's raw totals as quote-backed without checking its
+  // currency first would silently subtract, say, a USD quote from a
+  // KES deal and label the result KES — a materially wrong landed
+  // cost/profit/proceed-or-hold decision. Only a currency-matching
+  // accepted, unexpired quote counts as quote-backed; a mismatched one
+  // is surfaced honestly below instead of silently ignored or misused.
+  const acceptedQuote = dealQuotes.find((q) => q.status === "accepted" && new Date(q.validUntil).getTime() > now && q.currency === deal.currency);
+  const mismatchedCurrencyQuote = !acceptedQuote
+    ? dealQuotes.find((q) => q.status === "accepted" && new Date(q.validUntil).getTime() > now && q.currency !== deal.currency)
+    : undefined;
   const quoteLanded = acceptedQuote ? acceptedQuote.goodsTotal + acceptedQuote.freightTotal + acceptedQuote.borderEstimate + acceptedQuote.inspectionTotal + acceptedQuote.insuranceTotal + acceptedQuote.financeFxTotal + acceptedQuote.otherTotal : null;
   const landed = quoteLanded ?? estimatedLanded;
   const profit = (cost?.expectedRevenue || 0) - landed;
@@ -75,7 +89,7 @@ export default async function DealRoom({ params }: { params: Promise<{ id: strin
     <header><div className="brand"><i>TS</i><span><b>TradeSafe Africa</b><small>{deal.reference}</small></span></div><nav>{!isOwner && <span className="viewbadge">Viewing as {viewReason === "platform_role" ? "verification staff" : "counterparty"} — read only</span>}<a href="/dashboard">My deals</a><a href="/">Opportunity map</a></nav></header>
     <section className="roomhead"><div><p>{deal.stage.toUpperCase()}</p><h1>{deal.product}</h1><span>{deal.origin} → {deal.destination} · {deal.quantity || "—"} {deal.unit}</span></div><aside className={score < 50 ? "danger" : score < 88 ? "warning" : "ready"}><b>{score}</b><span>/100 evidence score</span></aside></section>
     <section className="roommetrics"><article><small>{quoteLanded ? "QUOTE-BACKED LANDED COST" : "ESTIMATED LANDED COST"}</small><b>{formatCurrency(landed, deal.currency)}</b></article><article><small>REPORTED SALE VALUE</small><b>{formatCurrency(cost?.expectedRevenue || 0, deal.currency)}</b></article><article><small>{quoteLanded ? "QUOTE-BACKED PROFIT" : "ESTIMATED PROFIT"}</small><b className={profit >= 0 ? "positive" : "negative"}>{formatCurrency(profit, deal.currency)}</b></article><article><small>DECISION</small><b>{profit > 0 && score === 100 ? "REVIEW TO PROCEED" : "HOLD"}</b></article></section>
-    <section className="resolutionnote"><b>Commercial status:</b> {quoteLanded ? "These figures are backed by an accepted, unexpired quote from the counterparty organization — still not a binding contract without one." : "These figures are user-reported estimates, not transaction-ready prices."} Profit becomes quote-backed only after buyer and supplier quotes are accepted and unexpired. <a href="/disputes">Open the resolution center</a>.</section>
+    <section className="resolutionnote"><b>Commercial status:</b> {quoteLanded ? "These figures are backed by an accepted, unexpired quote from the counterparty organization — still not a binding contract without one." : "These figures are user-reported estimates, not transaction-ready prices."} Profit becomes quote-backed only after buyer and supplier quotes are accepted and unexpired. {mismatchedCurrencyQuote && <>An accepted quote exists in {mismatchedCurrencyQuote.currency}, not this deal&apos;s {deal.currency} — it cannot be used for the figures above without a currency conversion this platform does not perform; reconcile the currency before relying on it. </>}<a href="/disputes">Open the resolution center</a>.</section>
     {/* Priority 12 (docs/production-readiness.md): the itemized, sourced
         breakdown behind the summary figures above — never a replacement
         for them, an additional layer of honesty on top. */}

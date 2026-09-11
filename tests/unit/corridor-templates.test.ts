@@ -221,4 +221,29 @@ describe("GET /api/corridor-templates (public)", () => {
     expect(body.corridors[0].version).toBe(2);
     expect(body.corridors[0].expectedTiming).toBe("new timing");
   });
+
+  it("FIX (production-hardening audit, PR review finding): a corridor whose CURRENT version is suspended is excluded, never silently replaced by an older operational version", async () => {
+    const key = corridorKeyFor("Ghana", "Nigeria");
+    await createCorridorTemplateVersion({
+      corridorKey: key, origin: "Ghana", destination: "Nigeria", status: "operational", confidence: "high",
+      productCategoriesJson: "[]", requiredBuyerInfo: "", requiredSupplierInfo: "", requiredDocumentsJson: "[]",
+      verificationRequirements: "", standardMilestonesJson: "[]", evidenceRequiredJson: "{}", approvedPartnerRolesJson: "[]",
+      expectedTiming: "v1 — was verified", costComponentsJson: "[]", riskRules: "", escalationRules: "", sourceAttribution: "",
+      reviewerEmail: "reviewer@example.com", createdByEmail: "admin@example.com",
+    }); // version 1: operational
+    await createCorridorTemplateVersion({
+      corridorKey: key, origin: "Ghana", destination: "Nigeria", status: "suspended", confidence: "high",
+      productCategoriesJson: "[]", requiredBuyerInfo: "", requiredSupplierInfo: "", requiredDocumentsJson: "[]",
+      verificationRequirements: "", standardMilestonesJson: "[]", evidenceRequiredJson: "{}", approvedPartnerRolesJson: "[]",
+      expectedTiming: "v2 — now suspended", costComponentsJson: "[]", riskRules: "", escalationRules: "", sourceAttribution: "",
+      reviewerEmail: "reviewer@example.com", createdByEmail: "admin@example.com",
+    }); // version 2 (current): suspended
+    const res = await publicGet();
+    const body = (await res.json()) as { corridors: Array<{ expectedTiming: string; tier: string }> };
+    // Before the fix: the old status!="suspended" WHERE clause filtered
+    // out v2 before "current version" was even decided, so v1 (stale,
+    // operational) surfaced as if it were current — a suspended
+    // corridor publicly shown as "TradeSafe Verified."
+    expect(body.corridors).toEqual([]);
+  });
 });

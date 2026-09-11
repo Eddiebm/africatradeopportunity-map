@@ -73,7 +73,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     lowAmount,
     expectedAmount,
     highAmount,
-    currency: typeof body.currency === "string" ? body.currency : undefined,
+    // FIX (production-hardening audit, PR review finding): never trust a
+    // client-supplied currency — the actual-cost form
+    // (app/components/LandedCostBreakdown.tsx) never sent one at all,
+    // so this silently defaulted to USD (lib/landed-cost.ts's
+    // `input.currency || "USD"`) regardless of the deal's real
+    // currency, storing estimates and actuals in different currencies
+    // for any non-USD deal and corrupting the variance/actual-total
+    // math. The deal's own currency is already loaded via `access.deal`
+    // (requireDealAccessOrResponse already fetched it) — derive from
+    // that, the same way this codebase already refuses a client-forged
+    // organizationId elsewhere (Priority 9).
+    currency: access.deal.currency,
     source,
     sourceDate: typeof body.sourceDate === "string" ? body.sourceDate : null,
     confidence: confidence as "low" | "medium" | "high",
