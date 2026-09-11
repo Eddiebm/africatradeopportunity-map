@@ -2038,16 +2038,17 @@ clean · `test:build-smoke` clean.
 **Remaining risks, explicitly deferred (from the fresh audit's findings,
 not yet addressed):**
 - No paging/alerting on any observability signal (already known,
-  Priority 3) and no rehearsed backup/restore drill (already known,
-  `docs/DEPLOYMENT.md`) — both restated as still-open under this audit's
-  Phase 5/Phase 6 requirements, not new findings.
+  Priority 3) — restated as still-open under this audit's Phase 5
+  requirements, not a new finding.
+- No rehearsed RESTORE drill. Automated backups now exist (Phase 8,
+  below) and self-service data export shipped (Phase 8), but nobody has
+  actually exercised restoring a backup end to end — that still needs
+  real Cloudflare account access this session doesn't have, and remains
+  an open risk until someone runs it for real at least once.
 - R2 document retention/lifecycle policy still unset (already known,
   needs legal input).
-- Self-service data EXPORT (not deletion — see the Phase 7 entry below)
-  is still not built. `app/legal/privacy/page.tsx` states this plainly
-  and names the operator as the fallback contact until it exists.
 
-**Manual configuration still required:** merge PR #1; run
+**Manual configuration still required:** run
 `wrangler secret put SESSION_SECRET` for both the default and `preview`
 environments against the real account; the real Worker deploy itself
 (needs `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` as GitHub Actions
@@ -2120,3 +2121,73 @@ it; admin approve/deny end to end; API auth/validation on every route) ·
 in application code and a migration, applied the same way as every other
 migration in `docs/DEPLOYMENT.md` (`npm run db:migrate:remote`, or
 `--env preview`).
+
+### Phase 8 — launch prep: PR #1 merged, self-service data export, automated backups
+
+PR #1 (Phases 0–7 above, 56 commits) merged to `main` as `06696f3`. This
+phase covers what was fixable from this session without new account-level
+credentials, prompted by "is this app production ready?" / "let us
+prepare to launch to public."
+
+**Fixed:**
+- `lib/data-export.ts` + `app/api/account/data-export/route.ts` +
+  a "Download my data" section on `/account`: a signed-in user can
+  download a JSON export of their own profile, the organizations they
+  own or belong to, deals they created, disputes they opened or were
+  named respondent on, their notifications, and their login history.
+  Scope stated explicitly (mirrors `lib/account-deletion.ts`'s own scope
+  note): this does NOT reconstruct every row anywhere that happens to
+  mention their email — data living inside another party's deal room
+  (a message they posted, a landed-cost entry someone else recorded on a
+  deal they're a party to but don't own) is out of scope for this pass,
+  since exporting it here would mean exporting parts of someone ELSE's
+  deal room. `app/legal/privacy/page.tsx` updated accordingly.
+- `lib/data-backup.ts`, wired into `worker/index.ts`'s daily Cron
+  Trigger as `data-backup`: closes the "no automated backup Cron
+  Trigger" gap open since Priority 3. Every run writes a full JSON
+  snapshot of every table in `db/schema.ts` (tables discovered
+  dynamically via drizzle's own table registry, not a hand-maintained
+  list that could silently go stale) to the existing R2 bucket under
+  `backups/<timestamp>.json`, then prunes snapshots older than
+  `BACKUP_RETENTION_DAYS` (30, a purely operational disaster-recovery
+  choice — NOT the audit-log retention decision, which stays
+  `lib/audit-retention.ts`'s separate, account-owner-confirmed 3-year
+  window). Explicitly documented as NOT a replacement for the manual
+  `wrangler d1 export --remote` SQL dump `docs/DEPLOYMENT.md` calls for
+  before a destructive migration — Workers' D1 binding has no dump API;
+  this is a real, automated, application-level snapshot, which the
+  manual CLI step by definition isn't.
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (56 warnings,
+unchanged) · **262/262 tests** (12 new: export includes exactly the
+caller's own profile/orgs/deals/disputes/notifications/login-history and
+never another user's or another party's data, never the password hash;
+the API route requires sign-in and only ever exports the signed-in
+caller's own data; a real inserted row survives into a real R2 object;
+table discovery picks up a table never named in the backup code itself;
+retention pruning keeps a just-written backup and deletes one once
+past the window) · `build` clean · `test:build-smoke` clean.
+
+**Remaining risks, restated from Phase 6/Phase 7, still genuinely
+open — none of these are things this session can do without real
+account access:**
+- No rehearsed RESTORE drill — the backup mechanism now exists and is
+  tested, but nobody has actually restored one for real yet.
+- No real email provider connected — `lib/email.ts`'s
+  `ConsoleEmailProvider` still only logs verification/reset emails
+  instead of sending them. Declined for this pass (account owner chose
+  "not yet" when asked which provider to wire up); this is the one
+  functional gap that will stop real users from completing signup or
+  password reset once the app is actually deployed.
+- No paging/alerting; R2 retention policy still needs legal input.
+- `SESSION_SECRET`, `TURNSTILE_SECRET_KEY` /
+  `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, and `CLOUDFLARE_API_TOKEN` /
+  `CLOUDFLARE_ACCOUNT_ID` have never been set against the real account —
+  the Worker has never actually been deployed. This is the actual
+  remaining blocker to going live, and it is entirely account-level
+  steps, not code.
+
+**Manual configuration still required:** the four secrets above, then a
+real `wrangler deploy` (or a green CI run on `main` once the GitHub
+Actions secrets are set) — see `docs/DEPLOYMENT.md`'s "Secrets this app
+currently needs" table for exactly where each one goes.

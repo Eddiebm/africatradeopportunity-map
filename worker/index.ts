@@ -7,6 +7,7 @@ import { recordCronRun } from "../lib/cron-runs";
 import { syncExceptionQueue } from "../lib/exceptions";
 import { purgeExpiredAuditRecords } from "../lib/audit-retention";
 import { processDueAccountDeletions } from "../lib/account-deletion";
+import { runBackupAndPrune } from "../lib/data-backup";
 
 interface Env {
   ASSETS: Fetcher;
@@ -149,6 +150,21 @@ const worker = {
         })
         .catch((error) => {
           logServerError(newCorrelationId(), { method: "CRON", pathname: "account-deletion-sweep" }, error);
+        }),
+    );
+    // Launch-prep follow-up: see lib/data-backup.ts's header comment for
+    // exactly what this is (a real, automated, application-level JSON
+    // snapshot of every table — NOT a replacement for the manual
+    // `wrangler d1 export` SQL dump docs/DEPLOYMENT.md still calls for
+    // before a destructive migration). Closes the "no automated backup
+    // Cron Trigger" gap that's been an explicit open risk since Priority 3.
+    ctx.waitUntil(
+      recordCronRun("data-backup", () => runBackupAndPrune())
+        .then((result) => {
+          console.log(`[data-backup] wrote ${result.key} (${result.totalRows} rows across ${Object.keys(result.tableCounts).length} tables); pruned ${result.deleted} backups past the retention window, kept ${result.kept}`);
+        })
+        .catch((error) => {
+          logServerError(newCorrelationId(), { method: "CRON", pathname: "data-backup" }, error);
         }),
     );
   },
