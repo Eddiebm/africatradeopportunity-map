@@ -127,13 +127,13 @@ pass — see that workflow file for the exact gating. Production deploys
 need `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set as GitHub
 Actions repository secrets.
 
-**Status**: both secrets confirmed present on the repo (`gh secret list`)
-as of this commit — the `deploy` job had run and failed on every prior
-push to `main` since PR #1 first merged (missing token, confirmed from
-the job logs), meaning none of this project's work had actually reached
-Cloudflare until now. This commit is what triggers the first real deploy
-with both secrets actually in place; see the `deploy` job on this
-commit's run for the outcome.
+**Status**: both secrets confirmed present on the repo (`gh secret list`).
+The deploy attempt after that got real credentials working for the first
+time — it authenticated, built, and uploaded all 38 static assets — but
+failed on the final R2 binding step with Cloudflare error code 10042
+("Please enable R2 through the Cloudflare Dashboard"), meaning R2 had
+never been activated on this account. R2 has now been enabled; this
+commit triggers the next real deploy attempt.
 
 ## 8. Rollback
 
