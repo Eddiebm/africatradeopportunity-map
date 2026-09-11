@@ -1957,3 +1957,105 @@ copy in user-facing text generally, not just in this one sentence.
 ---
 
 All 13 priorities from the original specification are now complete.
+
+---
+
+## Production-hardening audit (2026-09-11) — follow-up phases
+
+A fresh production-hardening audit was requested against this app on top
+of the 13 priorities above. Findings and the full report live in the
+audit session's conversation; the report's conclusion, verified by
+re-reading the current code (not assumed from the priorities above): the
+13 priorities already cover this audit's Phases 1, 3, 4, and 5 in
+substance (structured error logging + correlation IDs, CSRF/CSP/session
+hygiene, audit trails, rate limiting, webhook verification, idempotency,
+authorization attack-testing, health checks). What follows is only the
+genuinely new work from that audit's findings — not a re-verification of
+what Priorities 1–13 already covered.
+
+### Phase 0 — merge the branch
+
+The single highest-value finding: `main` was still the original
+OpenAI-Sites-scaffold commit — none of Priorities 1–13 had ever been
+merged. Opened `claude/production-tradesafe` → `main` as PR #1; this is
+the actual prerequisite for CI's deploy job to ever run.
+
+### Phase 2 — environment isolation: real preview D1/R2
+
+**Finding**: `wrangler.jsonc`'s `env.preview.d1_databases[0].database_id`
+was still the local-dev placeholder — a preview deploy would either fail
+or invite an operator to point preview at the production database_id by
+accident.
+
+**Fixed**: provisioned a real preview D1 database
+(`tradesafe-africa-db-preview`) and R2 bucket
+(`tradesafe-africa-documents-preview`), wired the real database_id into
+`wrangler.jsonc`, applied all 19 migrations directly (verified
+table-for-table identical to production — 43/43 tables) including a
+correctly-populated `d1_migrations` bookkeeping table so a later
+`wrangler d1 migrations apply --env preview` won't try to re-run
+anything. `docs/DEPLOYMENT.md` updated. Still open:
+`wrangler secret put SESSION_SECRET --env preview` against the real
+account (needs real Cloudflare CLI credentials this session doesn't
+have).
+
+### Phase 6 — release safety: a kill switch + loading states
+
+**Finding**: zero feature flags/kill switches existed anywhere in the
+codebase (confirmed by a full-repo grep), and no `loading.tsx` route
+boundaries existed despite `error.tsx`/`not-found.tsx` (Priority 3)
+already being in place.
+
+**Fixed**:
+- `lib/whatsapp.ts`'s `getWhatsAppProvider()` now checks a new
+  `WHATSAPP_SENDS_ENABLED` binding (declared in `worker/env.d.ts`,
+  documented in `.dev.vars.example`) on every call — re-checked live, not
+  cached at cold-start, so a mid-incident flag change takes effect on the
+  next request with no redeploy. Since no real WhatsApp provider is
+  connected yet (only `ConsoleWhatsAppProvider` exists — see Priority
+  10's own stopping-condition note), this has no live effect today; it
+  exists so the switch is already in place the moment a real provider is
+  wired in later, rather than that being a thing to remember to add at
+  the same time. A new `DisabledWhatsAppProvider` gives a distinguishable
+  reason ("disabled" vs. "never configured") so the two states are never
+  confused when reading `whatsapp_messages` later.
+- Added `loading.tsx` to the four Server Component routes that do a real
+  D1 fetch before rendering and previously showed a blank page while
+  that was in flight: `/dashboard`, `/deal/:id` (the heaviest single page
+  in the app), `/disputes/:id`, `/admin/metrics`. Client-rendered pages
+  (`/admin`, `/organizations/:id`) already manage their own loading state
+  via `useState`/`useEffect` and were left alone — a `loading.tsx`
+  segment file has no effect on a page that renders instantly and fetches
+  client-side.
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (54 warnings,
+unchanged from Priority 13's baseline) · **224/224 tests** (3 new: the
+kill switch defaults to enabled when unset, `WHATSAPP_SENDS_ENABLED=false`
+disables sending with a distinguishable reason string, and it re-enables
+on the very next call once cleared — no redeploy required) · `build`
+clean · `test:build-smoke` clean.
+
+**Remaining risks, explicitly deferred (from the fresh audit's findings,
+not yet addressed):**
+- No account-deletion/data-export self-service flow —
+  `app/legal/privacy/page.tsx` states this is planned but not built.
+  Deliberately not built in this pass: it's the one item on the fresh
+  audit's findings list that would eventually execute real deletions
+  against production data, and the design (soft-delete vs. hard delete,
+  retention window, what counts as "deletion" for audit-trail rows that
+  reference the account) needs the account owner's sign-off before being
+  built, not a unilateral implementation.
+- No retention policy defined for `security_events`/`admin_audit_events`
+  — needs a stated window from the account owner, not invented here.
+- No paging/alerting on any observability signal (already known,
+  Priority 3) and no rehearsed backup/restore drill (already known,
+  `docs/DEPLOYMENT.md`) — both restated as still-open under this audit's
+  Phase 5/Phase 6 requirements, not new findings.
+- R2 document retention/lifecycle policy still unset (already known,
+  needs legal input).
+
+**Manual configuration still required:** merge PR #1; run
+`wrangler secret put SESSION_SECRET` for both the default and `preview`
+environments against the real account; the real Worker deploy itself
+(needs `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` as GitHub Actions
+secrets for CI's deploy job, or a manual `wrangler deploy`).

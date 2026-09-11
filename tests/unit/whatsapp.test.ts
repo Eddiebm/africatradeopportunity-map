@@ -7,13 +7,14 @@
 // actually reached (it wasn't — that's the whole point of the adapter).
 import { beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
+import { env } from "cloudflare:workers";
 import { getDb } from "../../db";
 import {
   adminAuditEvents, deals, dealCosts, dealEvents, milestones, marketRequests, sessions, secureLinks, users,
   whatsappContacts, whatsappMessages,
 } from "../../db/schema";
 import {
-  getOptedInPhoneForEmail, getWhatsAppContact, isOptedOut, looksLikeOptOut,
+  getOptedInPhoneForEmail, getWhatsAppContact, getWhatsAppProvider, isOptedOut, looksLikeOptOut,
   recordWhatsAppConsent, recordWhatsAppOptOut, sendWhatsAppMessage,
 } from "../../lib/whatsapp";
 import { createSecureLink, resolveSecureLink } from "../../lib/secure-links";
@@ -81,6 +82,32 @@ describe("lib/whatsapp — consent, opt-out, sending", () => {
     expect(await isOptedOut("+233555000333")).toBe(true);
     await recordWhatsAppConsent("+233555000333");
     expect(await isOptedOut("+233555000333")).toBe(false);
+  });
+
+  it("getWhatsAppProvider defaults to the console provider when WHATSAPP_SENDS_ENABLED is unset", () => {
+    delete (env as unknown as Record<string, unknown>).WHATSAPP_SENDS_ENABLED;
+    expect(getWhatsAppProvider().name).toBe("console");
+  });
+
+  it("getWhatsAppProvider — the kill switch (Phase 6, production-hardening audit): WHATSAPP_SENDS_ENABLED=false disables sending, with an honest, distinguishable reason", async () => {
+    (env as unknown as Record<string, unknown>).WHATSAPP_SENDS_ENABLED = "false";
+    try {
+      const provider = getWhatsAppProvider();
+      expect(provider.name).toBe("disabled");
+      const result = await provider.send({ to: "+233555000999", body: "should not send" });
+      expect(result.delivered).toBe(false);
+      expect(result.detail).toContain("disabled");
+      expect(result.detail).not.toBe("No WhatsApp Business API provider is connected. The message was logged, not sent."); // distinguishable from "never configured"
+    } finally {
+      delete (env as unknown as Record<string, unknown>).WHATSAPP_SENDS_ENABLED;
+    }
+  });
+
+  it("getWhatsAppProvider re-enables on the next call once the flag is cleared — no redeploy needed", () => {
+    (env as unknown as Record<string, unknown>).WHATSAPP_SENDS_ENABLED = "false";
+    expect(getWhatsAppProvider().name).toBe("disabled");
+    delete (env as unknown as Record<string, unknown>).WHATSAPP_SENDS_ENABLED;
+    expect(getWhatsAppProvider().name).toBe("console");
   });
 
   it("sendWhatsAppMessage REFUSES to send to a number with no consent on file — logged as failed, not attempted", async () => {

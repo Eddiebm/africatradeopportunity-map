@@ -15,6 +15,7 @@
 // successful send, and the interface stays stable regardless of which real
 // provider eventually gets connected.
 import { and, eq, isNull } from "drizzle-orm";
+import { env } from "cloudflare:workers";
 import { getDb } from "../db";
 import { whatsappContacts, whatsappMessages } from "../db/schema";
 import { createSecureLink } from "./secure-links";
@@ -50,10 +51,40 @@ class ConsoleWhatsAppProvider implements WhatsAppProvider {
   }
 }
 
+// Production-hardening audit follow-up (Phase 6 — release safety, kill
+// switch): distinct from ConsoleWhatsAppProvider above — this fires only
+// when an operator has explicitly set WHATSAPP_SENDS_ENABLED=false, so the
+// resulting detail string says so plainly rather than being
+// indistinguishable from "no provider was ever configured." No real send
+// attempt is made either way; the difference is purely in what the caller
+// (and anyone reading whatsapp_messages later) is told happened and why.
+class DisabledWhatsAppProvider implements WhatsAppProvider {
+  readonly name = "disabled";
+
+  async send(message: WhatsAppMessage): Promise<WhatsAppSendResult> {
+    console.log(`[whatsapp:disabled] to=${message.to} — WHATSAPP_SENDS_ENABLED=false, message not sent or logged in full`);
+    return {
+      delivered: false,
+      provider: this.name,
+      providerMessageId: "",
+      detail: "WhatsApp sending is currently disabled (WHATSAPP_SENDS_ENABLED=false).",
+    };
+  }
+}
+
 let provider: WhatsAppProvider | null = null;
+let lastEnabledFlag: string | undefined;
 
 export function getWhatsAppProvider(): WhatsAppProvider {
-  if (!provider) provider = new ConsoleWhatsAppProvider();
+  // Re-check the flag on every call (not just once, cached forever) so a
+  // mid-incident secret change takes effect on the next request without
+  // requiring a redeploy — the whole point of a kill switch.
+  const enabled = env.WHATSAPP_SENDS_ENABLED !== "false";
+  const flagKey = String(enabled);
+  if (!provider || lastEnabledFlag !== flagKey) {
+    provider = enabled ? new ConsoleWhatsAppProvider() : new DisabledWhatsAppProvider();
+    lastEnabledFlag = flagKey;
+  }
   return provider;
 }
 

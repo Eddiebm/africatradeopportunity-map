@@ -25,3 +25,12 @@ TURNSTILE_SECRET_KEY=
 # webhook still processes requests (documented, not silently faked as
 # "verified") but logs plainly that no secret was configured.
 WHATSAPP_WEBHOOK_SECRET=
+
+# Production-hardening audit follow-up (Phase 6 — release safety): kill
+# switch for real outbound WhatsApp sends, checked in
+# lib/whatsapp.ts's getWhatsAppProvider(). No real provider is connected
+# yet (only ConsoleWhatsAppProvider exists), so this has no effect today —
+# it exists so that whenever a real provider IS wired in, an operator can
+# stop real sends immediately (mid-incident, no redeploy) by setting this
+# to exactly "false". Leave unset (default: enabled).
+WHATSAPP_SENDS_ENABLED=

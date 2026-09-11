@@ -34,6 +34,18 @@ interface Env {
    * lib/whatsapp.ts's header for the full stopping-condition note.
    */
   WHATSAPP_WEBHOOK_SECRET: string;
+  /**
+   * Production-hardening audit follow-up (Phase 6 — release safety): a
+   * kill switch for real outbound WhatsApp sends, checked in
+   * lib/whatsapp.ts's getWhatsAppProvider(). No real provider is wired in
+   * today (see lib/whatsapp.ts's own stopping-condition note) so this has
+   * no effect yet — it exists so that whenever a real provider IS
+   * connected later, there is already a way to stop real sends
+   * immediately (set to exactly "false") without a redeploy, mirroring
+   * turnstileEnforced()'s honest fail-open/fail-closed pattern above.
+   * Unset (default) means enabled.
+   */
+  WHATSAPP_SENDS_ENABLED: string;
 }
 
 declare namespace Cloudflare {
@@ -41,5 +53,6 @@ declare namespace Cloudflare {
     SESSION_SECRET: string;
     TURNSTILE_SECRET_KEY: string;
     WHATSAPP_WEBHOOK_SECRET: string;
+    WHATSAPP_SENDS_ENABLED: string;
   }
 }
