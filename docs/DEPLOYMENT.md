@@ -127,6 +127,13 @@ pass — see that workflow file for the exact gating. Production deploys
 need `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set as GitHub
 Actions repository secrets.
 
+**Status**: both secrets configured on the repo as of this commit — the
+`deploy` job had run and failed on every prior push to `main` since PR #1
+first merged (missing token, confirmed from the job logs), meaning none
+of this project's work had actually reached Cloudflare until now. This
+commit is what triggers the first real deploy with the secrets in place;
+see the `deploy` job on this commit's run for the outcome.
+
 ## 8. Rollback
 
 Cloudflare Workers keeps deployment history. To roll back to the previous
