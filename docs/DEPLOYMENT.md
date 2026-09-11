@@ -188,6 +188,28 @@ remaining risk (see docs/production-readiness.md), not implemented —
 doing so safely needs off-account storage credentials this environment
 doesn't have.
 
+**Audit-log retention (implemented — production-hardening audit follow-up,
+see docs/production-readiness.md's Phase 7):** `security_events` and
+`admin_audit_events` rows older than 3 years are deleted automatically by
+a daily Cron Trigger (`lib/audit-retention.ts`, wired into
+`worker/index.ts`'s `scheduled()` handler as `audit-log-retention-purge`).
+This is the ONLY retention/deletion policy in this schema — every other
+history table (deals, disputes, organization_verifications, exceptions,
+landed_cost_entries, ...) is retained indefinitely by design; see
+`lib/audit-retention.ts`'s header comment for why.
+
+**Account deletion (implemented — same Phase 7 follow-up):** a signed-in
+user can request deletion of their account from `/account`
+(`POST /api/account/deletion-request`). A clear account (no open deal,
+dispute, or exception) auto-anonymizes after a 24-hour grace period via
+the `account-deletion-sweep` Cron Trigger job; an account with something
+open is held for a staff member to review at `/admin` → "Account
+deletions." Anonymization scrubs the `users` row (email, name, password)
+and revokes every session — it does NOT rewrite the account's old email
+out of deals/disputes/other historical tables, which keep it as a real
+record of who did what (see `lib/account-deletion.ts`'s header comment
+for the full scope statement).
+
 ## 10. R2 document retention and recovery
 
 Deal documents live in the `tradesafe-africa-documents` R2 bucket

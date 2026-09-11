@@ -62,6 +62,45 @@ export const sessions = sqliteTable("sessions", {
   revokedAt: text("revoked_at"),
 });
 
+// Production-hardening audit follow-up (docs/production-readiness.md): "no
+// account-deletion flow" was flagged as a real gap. `users.status` already
+// had a "deleted" value and `users.deletionRequestedAt` already existed in
+// this schema — both were dead columns nothing ever set. This table is
+// what actually drives them: see lib/account-deletion.ts for the full
+// design (self-service request, auto-processed after a grace period UNLESS
+// the account has an open deal/dispute/exception, in which case it's held
+// for admin review instead — never silently deleted out from under an
+// active counterparty or an unresolved dispute).
+export const accountDeletionRequests = sqliteTable("account_deletion_requests", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  requestedAt: text("requested_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  // pending: auto-processes once scheduledFor elapses. held_for_review: an
+  // open deal/dispute/exception was found; an admin must decide. denied:
+  // the admin's decision to keep a held request's account as-is.
+  // completed: the account has actually been anonymized (see
+  // lib/account-deletion.ts's anonymizeUser) — reached either
+  // automatically (pending -> completed) or via admin approval
+  // (held_for_review -> completed). cancelled: the account holder
+  // withdrew their own request before it was decided or completed.
+  // cancelled/denied/completed are the only terminal states.
+  status: text("status").notNull().default("pending"),
+  // Only meaningful while status is "pending" — when the grace period ends
+  // and the automatic path executes (worker/index.ts's daily
+  // account-deletion-sweep, or a request that becomes due while a user is
+  // active — see lib/account-deletion.ts).
+  scheduledFor: text("scheduled_for"),
+  // Why this request was held for review instead of auto-processing — a
+  // plain description (e.g. "open deal TS-... at stage quotes_received"),
+  // not a foreign key, since a held request can be blocked by more than
+  // one open item and this is read-only context for the reviewing admin.
+  heldReason: text("held_reason").notNull().default(""),
+  decidedByEmail: text("decided_by_email").notNull().default(""),
+  decidedAt: text("decided_at"),
+  decisionReason: text("decision_reason").notNull().default(""),
+  completedAt: text("completed_at"),
+});
+
 export const emailVerificationTokens = sqliteTable("email_verification_tokens", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id").notNull().references(() => users.id),

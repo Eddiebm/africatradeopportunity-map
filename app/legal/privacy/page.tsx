@@ -30,8 +30,14 @@ export default function Privacy() {
         </p>
         <h2 style={{ fontSize: 18 }}>Your rights</h2>
         <p>
-          A production account-settings flow for exporting your data and requesting deletion is part of this
-          platform&rsquo;s onboarding scope; until that is live, contact the operator directly for either request.
+          You can request deletion of your account from <a href="/account">your account page</a> once signed in.
+          This anonymizes your name, email, and password and signs you out everywhere; it does not erase your deal,
+          dispute, or verification history, which this platform and any counterparties keep as a real record of what
+          happened (login/security and staff-decision logs are separately capped at a 3-year retention window; deal,
+          dispute, and verification records are not currently time-limited). If you have an open deal, dispute, or
+          exception, your request is held for staff review instead of processing automatically. A self-service
+          data-export flow is not yet built; until it is, contact the operator directly to request a copy of your
+          data.
         </p>
         <p>
           A complete Privacy Policy — covering legal basis for processing, retention periods, sub-processors, and

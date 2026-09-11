@@ -2037,25 +2037,86 @@ clean · `test:build-smoke` clean.
 
 **Remaining risks, explicitly deferred (from the fresh audit's findings,
 not yet addressed):**
-- No account-deletion/data-export self-service flow —
-  `app/legal/privacy/page.tsx` states this is planned but not built.
-  Deliberately not built in this pass: it's the one item on the fresh
-  audit's findings list that would eventually execute real deletions
-  against production data, and the design (soft-delete vs. hard delete,
-  retention window, what counts as "deletion" for audit-trail rows that
-  reference the account) needs the account owner's sign-off before being
-  built, not a unilateral implementation.
-- No retention policy defined for `security_events`/`admin_audit_events`
-  — needs a stated window from the account owner, not invented here.
 - No paging/alerting on any observability signal (already known,
   Priority 3) and no rehearsed backup/restore drill (already known,
   `docs/DEPLOYMENT.md`) — both restated as still-open under this audit's
   Phase 5/Phase 6 requirements, not new findings.
 - R2 document retention/lifecycle policy still unset (already known,
   needs legal input).
+- Self-service data EXPORT (not deletion — see the Phase 7 entry below)
+  is still not built. `app/legal/privacy/page.tsx` states this plainly
+  and names the operator as the fallback contact until it exists.
 
 **Manual configuration still required:** merge PR #1; run
 `wrangler secret put SESSION_SECRET` for both the default and `preview`
 environments against the real account; the real Worker deploy itself
 (needs `CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ACCOUNT_ID` as GitHub Actions
 secrets for CI's deploy job, or a manual `wrangler deploy`).
+
+### Phase 7 — audit-log retention + account deletion (account owner sign-off obtained)
+
+**Findings from Phase 6, now resolved with the account owner's explicit
+decisions:** a 3-year retention window for `security_events`/
+`admin_audit_events`, and a self-service-request account-deletion flow
+(anonymize, not hard-delete; auto-process after a grace period unless an
+open deal/dispute/exception exists, in which case hold for admin review).
+See `lib/audit-retention.ts`'s and `lib/account-deletion.ts`'s header
+comments for the full rationale — not restated here.
+
+**Fixed:**
+- `lib/audit-retention.ts`: `purgeExpiredAuditRecords()` deletes rows
+  older than 3 years from `security_events` and `admin_audit_events`
+  ONLY — every other "history" table in this app (`organization_verifications`,
+  `deal_events`, `corridor_templates`, `landed_cost_entries`, `exceptions`,
+  ...) is a real, load-bearing fact this platform's own data model depends
+  on and is never touched by this purge. Wired into `worker/index.ts`'s
+  daily Cron Trigger as `audit-log-retention-purge`, recorded via the same
+  `recordCronRun` mechanism as the other two scheduled jobs.
+- `lib/account-deletion.ts` + `db/schema.ts`'s new `account_deletion_requests`
+  table (`drizzle/0019_curved_black_cat.sql`): self-service request via
+  `POST /api/account/deletion-request` (and a new `/account` page —
+  `app/account/page.tsx` + `app/components/AccountDeletionPanel.tsx`).
+  A clear account (no open deal/dispute/exception — see
+  `checkOpenAccountActivity()`) is scheduled to auto-anonymize after a
+  24-hour grace period, re-checked again at execution time (not just at
+  request time) via the `account-deletion-sweep` Cron Trigger job. An
+  account with something open is held for admin review instead
+  (`app/api/admin/account-deletions/route.ts` + a new "Account deletions"
+  tab in `app/admin/page.tsx`) — an admin can approve (executes the
+  anonymization immediately, overriding the hold) or deny (leaves the
+  account untouched), both logged to `admin_audit_events` like every other
+  admin decision in this platform. `users.status` ("deleted") and
+  `users.deletionRequestedAt` already existed in the schema from an
+  earlier pass but were dead columns nothing ever set — this is what
+  actually drives them, and `lib/auth/session.ts` already refuses any
+  session for a non-"active" user, so a deleted account is immediately
+  locked out.
+- Scope boundary, stated explicitly rather than left implicit: anonymization
+  scrubs the `users` row itself and revokes every session, but does NOT
+  rewrite the user's old email out of `deals.ownerEmail`,
+  `disputes.openedByEmail`, or any other table that stores an email as
+  plain historical text rather than a foreign key — those are real facts
+  about who did what, the same reason `admin_audit_events.actorUserId` is
+  never rewritten. Scrubbing every historical email column across this
+  schema is a materially larger, separate decision, flagged here as an
+  open question rather than a corner quietly cut.
+- `app/legal/privacy/page.tsx` updated to describe the real, live flow
+  instead of "planned but not built."
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (56 warnings — two
+new `no-html-link-for-pages` warnings from the new `/account` nav links,
+same pre-existing pattern as every other internal `<a href>` in this
+codebase, not a new class of issue) · **250/250 tests** (20 new: 3-year
+purge deletes only rows older than the window in the two log tables and
+never touches `organization_verifications`; a clear account schedules,
+a blocked account holds, with the deal/dispute/exception reason named;
+idempotent re-request; cancel; the cron sweep anonymizes a due account
+end-to-end — PII scrubbed, sessions revoked, audit event logged — AND
+re-checks at execution time so a deal opened mid-grace-period still holds
+it; admin approve/deny end to end; API auth/validation on every route) ·
+`build` clean · `test:build-smoke` clean.
+
+**Manual configuration still required:** none new — this ships entirely
+in application code and a migration, applied the same way as every other
+migration in `docs/DEPLOYMENT.md` (`npm run db:migrate:remote`, or
+`--env preview`).

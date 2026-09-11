@@ -5,6 +5,8 @@ import { refreshStaleWatchlist } from "../lib/trade-intelligence";
 import { logServerError, newCorrelationId } from "../lib/observability";
 import { recordCronRun } from "../lib/cron-runs";
 import { syncExceptionQueue } from "../lib/exceptions";
+import { purgeExpiredAuditRecords } from "../lib/audit-retention";
+import { processDueAccountDeletions } from "../lib/account-deletion";
 
 interface Env {
   ASSETS: Fetcher;
@@ -119,6 +121,34 @@ const worker = {
         })
         .catch((error) => {
           logServerError(newCorrelationId(), { method: "CRON", pathname: "exception-queue-sync" }, error);
+        }),
+    );
+    // Production-hardening audit follow-up: see lib/audit-retention.ts's
+    // header comment for the full rationale (3-year retention window,
+    // confirmed by the account owner, applied only to the two pure log
+    // tables — securityEvents and adminAuditEvents).
+    ctx.waitUntil(
+      recordCronRun("audit-log-retention-purge", () => purgeExpiredAuditRecords())
+        .then((result) => {
+          console.log(`[audit-retention] purged ${result.securityEventsDeleted} securityEvents, ${result.adminAuditEventsDeleted} adminAuditEvents older than ${result.cutoff}`);
+        })
+        .catch((error) => {
+          logServerError(newCorrelationId(), { method: "CRON", pathname: "audit-log-retention-purge" }, error);
+        }),
+    );
+    // Production-hardening audit follow-up: see lib/account-deletion.ts's
+    // header comment. Processes any deletion request whose grace period
+    // has elapsed AND that never got held for admin review (no open deal/
+    // dispute/exception at request time) — a daily backstop, same pattern
+    // as the exception-queue-sync job above (also runs lazily wherever a
+    // request first becomes due, see that module).
+    ctx.waitUntil(
+      recordCronRun("account-deletion-sweep", () => processDueAccountDeletions())
+        .then((result) => {
+          console.log(`[account-deletion] processed ${result.processed}, still pending ${result.stillPending}`);
+        })
+        .catch((error) => {
+          logServerError(newCorrelationId(), { method: "CRON", pathname: "account-deletion-sweep" }, error);
         }),
     );
   },
