@@ -182,11 +182,18 @@ incident.
   reviewed process — there is no one-command fix for "undo the last N
   hours" once real user activity has continued past the backup point.
 
-**Not yet automated**: a scheduled backup Cron Trigger, backup retention
-policy, and a tested restore drill. Documented here as an explicit
-remaining risk (see docs/production-readiness.md), not implemented —
-doing so safely needs off-account storage credentials this environment
-doesn't have.
+**Automated application-level backup (implemented — launch-prep follow-up,
+see docs/production-readiness.md's Phase 8):** a daily Cron Trigger
+(`lib/data-backup.ts`, wired into `worker/index.ts` as `data-backup`)
+writes a full JSON snapshot of every table to this same R2 bucket under
+`backups/<timestamp>.json`, and prunes snapshots older than
+`BACKUP_RETENTION_DAYS` (30). This is NOT the same thing as the manual
+`wrangler d1 export --remote` SQL dump above — Workers' D1 binding has no
+export API, so this is an application-level JSON snapshot instead, real
+and automated but restored differently (replay each table's rows as
+INSERTs, not a single SQL file). Still not done: a REHEARSED RESTORE —
+nobody has actually restored one of these for real yet, which stays an
+open risk until someone does.
 
 **Audit-log retention (implemented — production-hardening audit follow-up,
 see docs/production-readiness.md's Phase 7):** `security_events` and

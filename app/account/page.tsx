@@ -20,6 +20,15 @@ export default async function Account() {
       <section className="portalhead">
         <div><p>ACCOUNT SETTINGS</p><h1>{user.displayName || user.email}</h1></div>
       </section>
+      <section className="portalempty">
+        <h2>Download my data</h2>
+        <p>
+          A JSON export of your profile, organizations, deals you created, disputes you&rsquo;re party to,
+          notifications, and login history. See <a href="/legal/privacy">the privacy page</a> for what this does and
+          doesn&rsquo;t include.
+        </p>
+        <a href="/api/account/data-export">Download my data →</a>
+      </section>
       <AccountDeletionPanel />
     </main>
   );
