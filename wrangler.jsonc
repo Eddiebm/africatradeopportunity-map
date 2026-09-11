@@ -20,6 +20,15 @@
   //      available when the D1/R2 resources above were provisioned via
   //      the Cloudflare Developer Platform MCP connector, which has no
   //      worker-code deploy tool.
+  //   5. done (production-hardening audit follow-up) — real preview D1
+  //      "tradesafe-africa-db-preview" and R2 bucket
+  //      "tradesafe-africa-documents-preview" provisioned; env.preview
+  //      below no longer points at the placeholder database_id, so a
+  //      preview deploy is now genuinely isolated from production data
+  //      rather than one placeholder ID away from accidentally sharing
+  //      it. Migrations applied to the new preview database. Still NOT
+  //      done: `wrangler secret put SESSION_SECRET --env preview`
+  //      against the real account.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tradesafe-africa",
   "main": "./worker/index.ts",
@@ -64,7 +73,7 @@
         {
           "binding": "DB",
           "database_name": "tradesafe-africa-db-preview",
-          "database_id": "00000000-0000-4000-8000-000000000000",
+          "database_id": "cbe20531-d9ed-4d16-8ee8-9e9c9a82067a",
           "migrations_dir": "drizzle"
         }
       ],

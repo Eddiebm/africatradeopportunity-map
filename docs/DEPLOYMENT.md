@@ -89,9 +89,19 @@ wrangler whoami   # confirms the account id; set CLOUDFLARE_ACCOUNT_ID or
                   # add "account_id" to wrangler.jsonc if it's ambiguous
 ```
 
-Repeat `d1 create` / `r2 bucket create` / `secret put` for the `preview`
-environment (`--env preview`) if you want an isolated preview database
-rather than sharing production data with preview deploys.
+**Preview environment (production-hardening audit follow-up): already done.**
+A real, isolated preview D1 database (`tradesafe-africa-db-preview`) and R2
+bucket (`tradesafe-africa-documents-preview`) exist and are wired into
+`wrangler.jsonc`'s `env.preview` block with real (non-placeholder) IDs — a
+preview deploy has never shared, and cannot accidentally start sharing,
+production data. Migrations 0000–0018 were applied directly (not yet via
+`wrangler d1 migrations apply --env preview`, since that requires real CLI
+credentials this session doesn't have) and verified table-for-table
+identical to production's 43 tables, including a correctly-populated
+`d1_migrations` bookkeeping table so a later `npm run db:migrate:remote --
+--env preview` won't try to re-run anything already applied. Still NOT
+done: `wrangler secret put SESSION_SECRET --env preview` against the real
+account — needed before a preview deploy can serve authenticated traffic.
 
 Then apply migrations to the real database:
 
