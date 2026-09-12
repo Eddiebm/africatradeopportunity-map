@@ -1,10 +1,14 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
+import { refreshReferencePrices } from "../lib/prices/refresh";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
+  DOCS: KVNamespace;
+  ADMIN_EMAILS?: string;
+  PRICE_REFRESH_SECRET?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -26,6 +30,9 @@ interface ExecutionContext {
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
 const worker = {
+  async scheduled(_controller: unknown, _env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(refreshReferencePrices());
+  },
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 

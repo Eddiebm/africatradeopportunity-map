@@ -1,0 +1,147 @@
+import type { DeskSource } from "./types";
+
+export const PUBLICATIONS = {
+  oecdSwac2025: {
+    id: "oecd-swac-2025",
+    name: "Intra-regional Food Trade in West Africa: New Evidence, New Perspectives",
+    publisher: "OECD / Sahel and West Africa Club",
+    asOf: "2025-09-01",
+    url: "https://doi.org/10.1787/3f5fd54a-en",
+    coverage:
+      "15 West African countries; recorded trade plus ECO-ICBT unrecorded flows, 2014–2022 average. ISBN 978-92-64-83002-8 (PDF). Foreword: ~USD 10 billion a year, six times official statistics; up to 68 trillion kcal. Not a 2026 price feed.",
+  },
+  oecdSwacBooklet2025: {
+    id: "oecd-swac-booklet-2025",
+    name: "Intra-regional Food Trade in West Africa — highlights booklet",
+    publisher: "OECD / SWAC",
+    asOf: "2025-08-01",
+    url: "https://www.oecd.org/content/dam/oecd/en/blogs/2025/08/Trade-Booklet-English-Final-August-2025.pdf",
+    coverage: "Same 2014–2022 dataset as the 2025 report",
+  },
+  ifpriVeg2018: {
+    id: "ifpri-ghana-veg-2018",
+    name: "Competitiveness of the Ghanaian Vegetable Sector — findings from a farmer survey",
+    publisher: "IFPRI",
+    asOf: "2018-01-01",
+    url: "https://cgspace.cgiar.org/server/api/core/bitstreams/7d77bcb2-11b1-4f09-a27a-4dee7677ca57/content",
+    coverage: "Harvest calendar from scoping trips and literature; Ghana tomatoes and onions",
+  },
+  ifpriTomato2010: {
+    id: "ifpri-gssp-wp19-2010",
+    name: "The Case of Tomato in Ghana: Productivity",
+    publisher: "IFPRI Ghana Strategy Support Program",
+    asOf: "2010-08-01",
+    url: "https://gssp.ifpri.info/files/2010/08/gsspwp191.pdf",
+    coverage: "Seasonality and Burkina supply December–May; older than OECD 2025",
+  },
+  ecowasCet2013: {
+    id: "ecowas-cet-2013",
+    name: "ECOWAS Common External Tariff — five-band structure",
+    publisher: "ECOWAS Commission",
+    asOf: "2013-10-25",
+    url: "https://ecotis.ecowas.int/policy-development/common-external-tariff-cet/",
+    coverage: "Adopted 25 October 2013; fifth band 35% for specific goods for economic development",
+  },
+  etlsOrigin2003: {
+    id: "etls-origin",
+    name: "ECOWAS Trade Liberalisation Scheme — originating goods circulate without customs duties",
+    publisher: "ECOWAS",
+    asOf: "2018-12-01",
+    url: "https://etls.ecowas.int/faqs/21276/",
+    coverage: "Protocol A/P1/1/03 and 2018 origin revision; agricultural goods in scheme since 1979",
+  },
+  ecowasAesExit2025: {
+    id: "ecowas-aes-exit-2025",
+    name: "Withdrawal of Burkina Faso, Mali and Niger from ECOWAS effective 29 January 2025",
+    publisher: "ECOWAS Commission",
+    asOf: "2025-01-29",
+    url: "https://www.ecowas.int/wp-content/uploads/2025/06/President-Speech_ExtraOrdinary-Council_Accra-April-2025.pdf",
+    coverage: "Treaty withdrawal after 12-month notice; contingency planning through 2025",
+  },
+  aesLevy2025: {
+    id: "aes-levy-2025",
+    name: "AES 0.5% import levy on goods from ECOWAS member states",
+    publisher: "Premium Times (reporting the AES measure)",
+    asOf: "2025-03-01",
+    url: "https://www.premiumtimesng.com/news/top-news/785099-mali-niger-burkina-faso-impose-0-5-import-levy-on-ecowas-countries.html",
+    coverage: "Levy on ECOWAS-origin goods entering Burkina Faso, Mali or Niger; humanitarian aid excepted",
+  },
+  sacuAgreement: {
+    id: "sacu-cet",
+    name: "Southern African Customs Union — single customs territory, CET on extra-SACU goods",
+    publisher: "SACU / Namibia Trade Information Portal",
+    asOf: "2002-01-01",
+    url: "https://namibiatradeportal.gov.na/market-access/southern-african-customs-union-sacu",
+    coverage: "Members: Botswana, Eswatini, Lesotho, Namibia, South Africa. 2002 Agreement in force from 2004",
+  },
+  eacCustoms: {
+    id: "eac-cu",
+    name: "East African Community Customs Union — common external tariff on extra-EAC goods",
+    publisher: "East African Community",
+    asOf: "2005-01-01",
+    url: "https://www.eac.int/integration-pillars/customs-union",
+    coverage: "Customs union operational 2005; CET applies without EAC origin proof",
+  },
+  cemacUnion: {
+    id: "cemac-cu",
+    name: "CEMAC customs union — common external tariff among six members",
+    publisher: "CEMAC",
+    asOf: "1994-01-01",
+    url: "https://www.cemac.int/",
+    coverage: "Cameroon, CAR, Chad, Republic of Congo, Equatorial Guinea, Gabon",
+  },
+  afcftaOrigin: {
+    id: "afcfta-origin",
+    name: "AfCFTA — preferential treatment requires proof of origin",
+    publisher: "AfCFTA Secretariat",
+    asOf: "2021-01-01",
+    url: "https://au-afcfta.org/",
+    coverage: "Trading under the agreement is documentary; a listing is not a certificate",
+  },
+  sadcTrade1996: {
+    id: "sadc-trade-1996",
+    name: "SADC Protocol on Trade (1996) — FTA, not a customs union",
+    publisher: "Southern African Development Community",
+    asOf: "2008-08-01",
+    url: "https://www.sadc.int/document/protocol-trade-1996",
+    coverage: "FTA launched August 2008. Origin still required. Not a CET: extra-SADC goods pay national tariffs. Angola, Comoros, DRC, Madagascar, Malawi, Mauritius, Mozambique, Seychelles, Tanzania, Zambia, Zimbabwe plus SACU five.",
+  },
+  comesaFta2000: {
+    id: "comesa-fta-2000",
+    name: "COMESA Free Trade Area — originating goods, not a CET",
+    publisher: "COMESA Secretariat",
+    asOf: "2000-10-31",
+    url: "https://www.comesa.int/trade-customs-division-2/",
+    coverage: "FTA 31 October 2000. As of April 2026, 16 members in the FTA; Ethiopia ~10% tariff cut, Eritrea ~80%; Eswatini under SACU derogation. Certificate of origin required. tradeportal.comesa.int",
+  },
+  algeriaMoroccoBorder: {
+    id: "dz-ma-border-1994",
+    name: "Algeria–Morocco land border closed since August 1994",
+    publisher: "Al Jazeera timeline; International Crisis Group",
+    asOf: "1994-08-01",
+    url: "https://www.aljazeera.com/news/2023/1/15/timeline-algeria-and-moroccos-diplomatic-disputes",
+    coverage: "Still closed as of 2023 reporting; diplomatic rupture 2021 did not reopen the land posts",
+  },
+  cocobod: {
+    id: "cocobod",
+    name: "Ghana cocoa marketing is licensed through COCOBOD",
+    publisher: "Ghana Cocoa Board",
+    asOf: "1984-01-01",
+    url: "https://cocobod.gh/",
+    coverage: "Statutory export channel; unlicensed side-selling is not a corridor this desk will screen",
+  },
+  oecGhanaSalt2024: {
+    id: "oec-ghana-salt-2024",
+    name: "Salt in Ghana Trade (HS 2501)",
+    publisher: "OEC / UN Comtrade",
+    asOf: "2024-12-31",
+    url: "https://oec.world/en/profile/bilateral-product/salt/reporter/gha",
+    coverage: "Recorded 2024 HS 2501 flows; informal Sahel bags may be larger than the print",
+  },
+} as const satisfies Record<string, DeskSource>;
+
+export type PublicationId = keyof typeof PUBLICATIONS;
+
+export function cite(...ids: PublicationId[]): DeskSource[] {
+  return ids.map((id) => PUBLICATIONS[id]);
+}

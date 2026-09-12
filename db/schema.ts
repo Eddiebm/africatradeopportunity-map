@@ -1,6 +1,24 @@
 import { sql } from "drizzle-orm";
 import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+export const users = sqliteTable("users", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  email: text("email").notNull().unique(),
+  passwordHash: text("password_hash").notNull(),
+  displayName: text("display_name").notNull(),
+  country: text("country").notNull().default(""),
+  role: text("role").notNull().default("trader"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const sessions = sqliteTable("sessions", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull().references(() => users.id),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const marketRequests = sqliteTable("market_requests", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   ownerEmail: text("owner_email"),
@@ -253,6 +271,51 @@ export const disputeEvents = sqliteTable("dispute_events", {
   toStatus: text("to_status").notNull().default(""),
   summary: text("summary").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const priceObservations = sqliteTable("price_observations", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  observedAt: text("observed_at").notNull(),
+  source: text("source").notNull(),
+  instrument: text("instrument").notNull(),
+  hsCode: text("hs_code").notNull().default(""),
+  origin: text("origin").notNull().default(""),
+  destination: text("destination").notNull().default(""),
+  currency: text("currency").notNull().default("USD"),
+  unit: text("unit").notNull(),
+  value: real("value").notNull(),
+  period: text("period").notNull().default(""),
+  url: text("url").notNull().default(""),
+  notes: text("notes").notNull().default(""),
+  confidence: text("confidence").notNull().default("official"),
+  rawJson: text("raw_json").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const priceLatest = sqliteTable("price_latest", {
+  key: text("key").primaryKey(),
+  instrument: text("instrument").notNull(),
+  hsCode: text("hs_code").notNull().default(""),
+  origin: text("origin").notNull().default(""),
+  destination: text("destination").notNull().default(""),
+  value: real("value").notNull(),
+  unit: text("unit").notNull(),
+  currency: text("currency").notNull().default("USD"),
+  source: text("source").notNull(),
+  period: text("period").notNull().default(""),
+  url: text("url").notNull().default(""),
+  notes: text("notes").notNull().default(""),
+  confidence: text("confidence").notNull().default("official"),
+  asOf: text("as_of").notNull(),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const priceRuns = sqliteTable("price_runs", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  startedAt: text("started_at").notNull(),
+  finishedAt: text("finished_at"),
+  status: text("status").notNull().default("running"),
+  summaryJson: text("summary_json").notNull().default("{}"),
 });
 
 export const notifications = sqliteTable("notifications", {

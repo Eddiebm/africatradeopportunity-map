@@ -1,2 +1,53 @@
-@media(max-width:900px){.tradesafe{grid-template-columns:1fr}.protect{grid-column:auto}.passgrid{grid-template-columns:1fr 1fr}}
-@media(max-width:700px){.tradesafe{margin:0}.checks{grid-template-columns:1fr}.protect{display:block}.protect label,.protect button{display:block;width:100%;margin-top:12px}.passport{margin:0 20px 40px;padding:20px}.passgrid,.milestones{grid-template-columns:1fr}.milestones>span{border-top:1px solid var(--line)}}
+html{overflow-x:clip}
+img,svg,video{max-width:100%;height:auto}
+button,a,[type="button"],[type="submit"]{touch-action:manipulation}
+@media(max-width:900px){
+.tradesafe{grid-template-columns:1fr}
+.protect{grid-column:auto}
+.passgrid{grid-template-columns:1fr 1fr}
+}
+@media(max-width:700px){
+html,body{overflow-x:clip}
+body{padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
+input,select,textarea{font-size:16px;max-width:100%}
+button{min-height:44px}
+.tradesafe{margin:0}
+.checks{grid-template-columns:1fr}
+.protect{display:block}
+.protect label,.protect button{display:block;width:100%;margin-top:12px}
+.protect button{min-height:44px}
+.passport{margin:0 16px 40px;padding:20px}
+.passgrid,.milestones{grid-template-columns:1fr}
+.milestones>span{border-top:1px solid var(--line)}
+.brand b{font-size:15px}
+.brand small{font-size:8px}
+.status{width:100%;justify-content:flex-start;gap:6px 12px;padding-top:2px}
+.status a{padding:8px 0;font-size:12px}
+.intro h1{font-size:clamp(32px,10vw,42px)}
+.desk{min-height:0}
+.list{height:min(40vh,240px)}
+.map{min-width:0;height:min(72vw,380px);min-height:280px}
+.productdesk .productgrid{grid-template-columns:1fr}
+.productgrid button{width:100%;min-height:44px}
+.classifieds{margin:20px 16px 36px}
+.classgrid button{min-height:44px;width:100%}
+.lanetable{overflow-x:visible;-webkit-overflow-scrolling:touch}
+.lanehdr{display:none}
+.lanehdr,.lanerow{min-width:0}
+.lanerow{display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;padding:14px}
+.lanerow>span:first-child{grid-column:1/3}
+.lanerow button{grid-column:1/3;width:100%;min-height:44px;padding:8px 12px}
+.intel{margin:0 0 36px}
+.intelhead{padding:20px 16px}
+.intelhead h2{font-size:26px}
+.intelhead>div:last-child{grid-template-columns:1fr}
+.intelhead button{width:100%;min-height:44px}
+.buildstatus{margin:0 0 24px}
+.dealhead h2,.execution h2,.insouts h2,.classhead h2{font-size:26px}
+}
+@media(max-width:480px){
+.passgrid{grid-template-columns:1fr}
+.nums b{font-size:20px}
+.ct h2{font-size:22px}
+.score strong{font-size:44px}
+}

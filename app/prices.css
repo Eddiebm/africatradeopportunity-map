@@ -1,0 +1,5 @@
+.reflines{grid-column:1/-1;margin:0 0 12px;padding:0;list-style:none;display:grid;gap:6px}
+.reflines li{font-size:11px;line-height:1.4;color:#5c6b63}
+.reflines b{color:#153d2d;margin-right:6px}
+.dealhead span{display:block;max-width:720px}
+.productgrid input[list]{width:100%;height:40px;border:1px solid var(--line);padding:0 10px;background:#fff;font-size:16px}

@@ -1,9 +1,9 @@
 "use client";
 import {useEffect,useState} from "react";
-import {hs2Catalog} from "../../lib/hs-catalog";
+import {PRODUCT_OPTIONS} from "../../lib/prices/catalog";
 
 type Intel={country:string;hs:string;product:string;annual:Array<{period:string;value:number;status:string}>;current:{year:number;monthsReported:number;value:number;annualizedValue:number;status:string};outlook:{nextYear:number;value:number;direction:string;growthRate:number;confidence:number;method:string};supply:{period:number;worldImports:number;africanSuppliers:Array<{country:string;value:number;share:number;status:string}>;status:string};sources:Array<{name:string;type:string;url:string}>;warnings:string[]};
-const products=["0702 — Tomatoes","0703 — Onions","1006 — Rice","1207 — Oilseeds","1509 — Vegetable oils","1801 — Cocoa beans","2523 — Cement","2710 — Refined petroleum","3004 — Medicines","7208 — Flat-rolled steel","8701 — Tractors","0102 — Live cattle",...hs2Catalog.map(([code,name])=>`${code} — ${name}`)];
+const products=PRODUCT_OPTIONS;
 const usd=(n:number)=>n?new Intl.NumberFormat("en",{style:"currency",currency:"USD",notation:"compact",maximumFractionDigits:1}).format(n):"No record";
 
 export default function ImportIntelligence({country}:{country:string}){

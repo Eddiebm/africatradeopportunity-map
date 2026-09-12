@@ -1,0 +1,65 @@
+Create one polished 16:9 text-free art-direction plate for the slide described below.
+
+Rules:
+- Make it creative, professional, and presentation-ready as visual direction, not as a finished slide screenshot.
+- Create a strictly text-free art plate: no readable titles, bullets, labels, numbers, dates, legends, table text, UI copy, logos, citations, or annotations.
+- Use the plate to establish or follow a visual system: palette, atmosphere, motif, image treatment, icon style, density, and broad composition mood.
+- Leave broad calm regions where deterministic editable PowerPoint objects can be authored later.
+- Be mindful of the intended slide composition, aspect ratio, placement, and crop. If the final slide will place editable text on one side, compose the subject or focal object on the opposite side with calm negative space for that text.
+- Use abstract placeholder strokes, unlabeled diagrams, soft panels, texture fields, collage areas, and broad hierarchy cues rather than exact text boxes that must be guessed later.
+- Do not create dense precise grids of cards, boxes, UI panels, tables, or chart frames unless the final builder will author matching editable geometry from a separate layout map.
+- Use at most one hero image or complex hero diagram per slide.
+- For slides after slide 1, only make the image suitable as a full-slide background if it has clear, low-detail calm regions where foreground cards, titles, charts, and labels can sit without visual clash. Otherwise compose it as a side panel, hero frame, texture strip, or decorative accent with generous negative space.
+- Include decorative or supporting visual material where useful: texture, atmosphere, motifs, contextual objects, cutaways, secondary details, and background depth. Do not make every slide depend on a single hero image.
+- If icons appear, make them simple Lucide/Heroicons-style glyphs, not invented branded symbols.
+- Vary layouts across slides; do not use left text / right image every time.
+- Do not reuse the exact visual content from earlier slides unless the prompt explicitly calls for a repeated background, texture, or branded motif.
+- Prefer lighter backgrounds unless the style guidance requests otherwise.
+- Do not use "key insight" or "takeaway" pop-up boxes.
+- Do not create a generic corporate blue slide unless the prompt specifically calls for it.
+- Keep a clear authored-deck target in mind: the final deck will place editable cards, charts, callouts, labels, and text with deterministic PowerPoint geometry over or alongside this art plate.
+- Hero/diagram/collage art should be easy to use as a full-slide background with fit: cover.
+
+Create slide 8 as a distinct slide that still belongs to the same deck visual system as slide 1. If the platform can use prior generated images as context, use slide 1 only as a style reference; do not reuse slide 1 content.
+Target canvas: 1280x720 16:9. If the image tool offers aspect controls, use a wide 16:9 composition.
+The outline begins with one intro paragraph, followed by exactly 11 slide sections. Each slide section has one title line and one explanatory paragraph. For this request, use only the 8th slide section after the intro paragraph, whose semantic concept is "## Slide 8". Use that concept only for composition and visual subject matter; never render the title or any section text as readable text in the image. Do not use neighboring sections' titles, facts, dates, or examples.
+
+Apply this style guidance to palette, typography feel, layout, icon treatment, density, and tone:
+Cream paper #F3F0E8, forest green #153D2D, muted gold #E2AA48, documentary West African trade, strictly text-free, 16:9, calm regions for titles. No logos, numbers, or readable words.
+
+Full outline:
+TradeSafe Africa partner and investor pitch. Visual system: cream paper, forest green, muted gold, documentary West African trade atmosphere, no readable text on plates, calm regions for titles.
+
+## Slide 1
+Cover. Full-bleed cream paper collage of a dusty ECOWAS highway at golden hour, onion sacks and a distant truck, wide empty left third for a title. Forest-green and gold as color accents only. No letters, numbers, or logos.
+
+## Slide 2
+Problem. Abstract WhatsApp-chat bubbles and cash notes dissolving into fog on the right; left two-thirds a calm cream field. Suggestion of unverified faces, no readable UI. Warm documentary grain.
+
+## Slide 3
+Product. Open manila dossier and HS-code documents on a wooden desk, map of West Africa as a faint unlabeled topographic relief on the right. Left side empty cream for copy. No text on papers.
+
+## Slide 4
+Loop. Five unlabeled circular stations connected by a gold path across a cream field, with produce crates and a truck silhouette as supporting texture at the bottom. Generous space above for a title.
+
+## Slide 5
+Live vs remaining. Split atmosphere: left a lit deal-room desk with a green lamp, right a dim warehouse doorway. No screens with copy. Calm top band.
+
+## Slide 6
+Market. Soft unlabeled continent silhouette of Africa in forest green on cream, gold trade-route threads, large empty lower-right for a chart. No country names.
+
+## Slide 7
+Beachhead. Border-post light at Paga-like savannah, produce trucks in queue, calm cream panel occupying the left 45 percent. No signs with words.
+
+## Slide 8
+Revenue. Layered translucent paper sheets and a gold coin-adjacent motif, not a real currency. Calm center for cards. Forest and cream only.
+
+## Slide 9
+Scale. Rising unlabeled bars as abstract architecture in forest green, gold horizon line, cream sky occupying the top half for a title. Leave the lower right empty for a real chart.
+
+## Slide 10
+Partners. Four quiet object still-lifes in a row: identity booklet, bank stamp, truck key, inspection clip. Cream background, gold rims. Space above for heading.
+
+## Slide 11
+Close. Dawn light over Accra-to-Sahel highway, empty cream overlay on the lower third for URL and legal line. No readable road signs.
+

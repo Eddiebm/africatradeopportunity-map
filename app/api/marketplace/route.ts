@@ -19,7 +19,7 @@ export async function GET(){
   db.select().from(marketRequests).where(eq(marketRequests.status,"verified")).orderBy(desc(marketRequests.id)).limit(200),
   db.select().from(matchCandidates).orderBy(desc(matchCandidates.createdAt)).limit(200)
  ]);
- const suggestions=mine.flatMap(own=>all.filter(other=>other.id!==own.id&&compatible(own.role,other.role)).map(other=>({ownId:own.id,counterpart:{id:other.id,role:other.role,product:other.product,origin:other.origin,destination:other.destination,volume:other.volume,status:other.status},...score(own,other)}))).filter(x=>x.total>=65).sort((a,b)=>b.total-a.total);
+ const suggestions=mine.flatMap(own=>all.filter(other=>other.id!==own.id&&other.ownerEmail!==own.ownerEmail&&compatible(own.role,other.role)).map(other=>({ownId:own.id,counterpart:{id:other.id,role:other.role,product:other.product,origin:other.origin,destination:other.destination,volume:other.volume,status:other.status},...score(own,other)}))).filter(x=>x.total>=65).sort((a,b)=>b.total-a.total);
  const relevant=matches.filter(m=>mine.some(x=>x.id===m.demandRequestId||x.id===m.supplyRequestId));
  const active=relevant.map(m=>{const demand=all.concat(mine).find(x=>x.id===m.demandRequestId),supply=all.concat(mine).find(x=>x.id===m.supplyRequestId);const ownIsDemand=mine.some(x=>x.id===m.demandRequestId);const counterpart=ownIsDemand?supply:demand;return {...m,counterpart:counterpart?{id:counterpart.id,product:counterpart.product,origin:counterpart.origin,destination:counterpart.destination,volume:counterpart.volume,contact:m.status==="approved"?counterpart.contact:"Contact withheld until mutual consent and review"}:null};});
  return Response.json({mine,suggestions:suggestions.slice(0,50),matches:active});
@@ -29,7 +29,7 @@ export async function POST(req:Request){
  const user=await getChatGPTUser();if(!user)return Response.json({error:"Sign in required."},{status:401});
  const body=await req.json() as {ownId?:number;counterpartId?:number};const ownId=Number(body.ownId),counterpartId=Number(body.counterpartId);if(!ownId||!counterpartId)return Response.json({error:"Choose a valid match."},{status:400});
  const db=getDb();const [[own],[other]]=await Promise.all([db.select().from(marketRequests).where(and(eq(marketRequests.id,ownId),eq(marketRequests.ownerEmail,user.email))).limit(1),db.select().from(marketRequests).where(and(eq(marketRequests.id,counterpartId),eq(marketRequests.status,"verified"))).limit(1)]);
- if(!own||!other||!compatible(own.role,other.role))return Response.json({error:"This match is no longer available."},{status:409});
+ if(!own||!other||own.ownerEmail===other.ownerEmail||!compatible(own.role,other.role))return Response.json({error:"This match is no longer available."},{status:409});
  const demand=own.role==="wanted"?own:other,supply=own.role==="for_sale"?own:other,id=`M-${demand.id}-${supply.id}`;let [match]=await db.select().from(matchCandidates).where(eq(matchCandidates.id,id)).limit(1);const now=new Date().toISOString();
  if(!match){[match]=await db.insert(matchCandidates).values({id,demandRequestId:demand.id,supplyRequestId:supply.id,score:score(own,other).total,scoreBreakdown:JSON.stringify(score(own,other).breakdown),status:"awaiting_counterparty",demandInterestAt:own.role==="wanted"?now:null,supplyInterestAt:own.role==="for_sale"?now:null}).returning();}
  else await db.update(matchCandidates).set(own.role==="wanted"?{demandInterestAt:now,updatedAt:now}:{supplyInterestAt:now,updatedAt:now}).where(eq(matchCandidates.id,id));

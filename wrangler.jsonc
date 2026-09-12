@@ -1,0 +1,33 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "africatradeopportunity-map",
+  "main": "./worker/index.ts",
+  "account_id": "9acb487ba7dffb5bdf65c0aabfd3bcb9",
+  "compatibility_date": "2026-08-27",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "images": {
+    "binding": "IMAGES"
+  },
+  "vars": {
+    "ADMIN_EMAILS": "eddie@bannermanmenson.com,mokoemensah@gmail.com"
+  },
+  "triggers": {
+    "crons": ["0 6 * * *"]
+  },
+  "kv_namespaces": [
+    {
+      "binding": "DOCS",
+      "id": "bee00d7241e54b69963d144a1eaffa00"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "africatradeopportunity-map-db",
+      "database_id": "9e16e66b-5260-45e8-9139-281b10a2cad6"
+    }
+  ]
+}

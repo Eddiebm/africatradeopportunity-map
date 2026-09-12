@@ -5,3 +5,17 @@ export const africaCountries = [
 export const comtradeCodeByName = Object.fromEntries(africaCountries.map(([name,,code]) => [name, code])) as Record<string,string>;
 export const iso2ByName = Object.fromEntries(africaCountries.map(([name,iso2]) => [name, iso2])) as Record<string,string>;
 export const africanComtradeCodes = new Set(africaCountries.map(([, ,code]) => String(Number(code))));
+
+const ISO3_BY_ISO2: Record<string, string> = {
+  DZ: "DZA", AO: "AGO", BJ: "BEN", BW: "BWA", BF: "BFA", BI: "BDI", CV: "CPV", CM: "CMR",
+  CF: "CAF", TD: "TCD", KM: "COM", CG: "COG", CI: "CIV", CD: "COD", DJ: "DJI", EG: "EGY",
+  GQ: "GNQ", ER: "ERI", SZ: "SWZ", ET: "ETH", GA: "GAB", GM: "GMB", GH: "GHA", GN: "GIN",
+  GW: "GNB", KE: "KEN", LS: "LSO", LR: "LBR", LY: "LBY", MG: "MDG", MW: "MWI", ML: "MLI",
+  MR: "MRT", MU: "MUS", MA: "MAR", MZ: "MOZ", NA: "NAM", NE: "NER", NG: "NGA", RW: "RWA",
+  ST: "STP", SN: "SEN", SC: "SYC", SL: "SLE", SO: "SOM", ZA: "ZAF", SS: "SSD", SD: "SDN",
+  TZ: "TZA", TG: "TGO", TN: "TUN", UG: "UGA", ZM: "ZMB", ZW: "ZWE",
+};
+
+export const iso3ByName = Object.fromEntries(
+  africaCountries.map(([name, iso2]) => [name, ISO3_BY_ISO2[iso2] || ""]),
+) as Record<string, string>;
