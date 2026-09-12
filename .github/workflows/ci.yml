@@ -75,3 +75,10 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Public by design (this is the Turnstile SITE key, not the secret
+          # key — see app/register/page.tsx and app/page.tsx's own header
+          # comments). `npm run deploy` builds the client bundle as part of
+          # `vinext deploy`, so this has to be present here, at build time,
+          # not just as a Worker runtime secret — a runtime-only secret
+          # would never reach the client-side widget that needs to render.
+          NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ secrets.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
