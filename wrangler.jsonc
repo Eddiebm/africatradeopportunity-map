@@ -7,28 +7,45 @@
   // `wrangler` / `vinext deploy` for preview and production deploys.
   //
   // Deploy status (see docs/DEPLOYMENT.md):
-  //   1. done  — real D1 database "tradesafe-africa-db" created, all 19
-  //      drizzle/*.sql migrations applied (39 tables, verified to match
-  //      local dev schema exactly), database_id below is real.
-  //   2. done  — real R2 bucket "tradesafe-africa-documents" created.
+  //   1. done — real D1 database "tradesafe-africa-db" created on the
+  //      Cloudflare account that actually owns this Worker
+  //      (9acb487ba7dffb5bdf65c0aabfd3bcb9), database_id below is real
+  //      for THAT account. IMPORTANT, found the hard way: an earlier
+  //      database of the same name existed on a DIFFERENT Cloudflare
+  //      account (the one this repo's own tooling/MCP connector had
+  //      access to) — its ID was committed here first and silently
+  //      pointed at a database the live Worker's account could never
+  //      see, producing wrangler error code 10181 ("database ... was not
+  //      found") on every deploy attempt. Never assume "a database with
+  //      this name exists somewhere" means it exists on the RIGHT
+  //      account — cross-check against the account the Worker itself is
+  //      deployed to (`wrangler whoami` / the account_id actually used
+  //      to deploy), not whatever account happens to be authenticated
+  //      locally or via an MCP connector.
+  //   2. done — real R2 bucket "tradesafe-africa-documents" exists on
+  //      the same account; R2 itself had to be explicitly enabled via
+  //      the Cloudflare dashboard first (account-level product
+  //      activation, not exposed through any API/CLI — error code
+  //      10042 until that one-time dashboard step was done).
   //   3. NOT done — `wrangler secret put SESSION_SECRET` (and any real
   //      email/WhatsApp-provider keys) still needs to be run against the
   //      real account before the Worker can serve traffic safely.
-  //   4. NOT done — the actual Worker script has not been pushed
-  //      (`wrangler deploy` / `vinext deploy`) — this requires CLI
-  //      credentials (CLOUDFLARE_API_TOKEN + account ID) that were not
-  //      available when the D1/R2 resources above were provisioned via
-  //      the Cloudflare Developer Platform MCP connector, which has no
-  //      worker-code deploy tool.
+  //   4. IN PROGRESS — CI's deploy job (CLOUDFLARE_API_TOKEN +
+  //      CLOUDFLARE_ACCOUNT_ID as GitHub Actions secrets) now targets
+  //      the correct account and a real database_id; migrations for
+  //      this NEW database_id still need to be applied
+  //      (`npm run db:migrate:remote` against the real account) before
+  //      the app is actually functional, not just deployed.
   //   5. done (production-hardening audit follow-up) — real preview D1
   //      "tradesafe-africa-db-preview" and R2 bucket
   //      "tradesafe-africa-documents-preview" provisioned; env.preview
-  //      below no longer points at the placeholder database_id, so a
-  //      preview deploy is now genuinely isolated from production data
-  //      rather than one placeholder ID away from accidentally sharing
-  //      it. Migrations applied to the new preview database. Still NOT
-  //      done: `wrangler secret put SESSION_SECRET --env preview`
-  //      against the real account.
+  //      below no longer points at the placeholder database_id. NOTE:
+  //      this preview database was provisioned on the OTHER account
+  //      (the one this session's MCP connector has access to), same
+  //      class of mismatch as item 1 above — it will need re-provisioning
+  //      on the correct account before a preview deploy actually works,
+  //      tracked as a follow-up, not blocking production. Still NOT
+  //      done either way: `wrangler secret put SESSION_SECRET --env preview`.
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "tradesafe-africa",
   "main": "./worker/index.ts",
@@ -43,7 +60,7 @@
     {
       "binding": "DB",
       "database_name": "tradesafe-africa-db",
-      "database_id": "d0ab7ce4-70c4-4b17-81df-30ff69e00b20",
+      "database_id": "b5722894-0f36-4858-9624-f49f08df3029",
       "migrations_dir": "drizzle"
     }
   ],

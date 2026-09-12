@@ -127,12 +127,18 @@ pass — see that workflow file for the exact gating. Production deploys
 need `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set as GitHub
 Actions repository secrets.
 
-**Status**: both secrets confirmed present, R2 confirmed purchased/active
-on the account (Cloudflare order confirmation seen directly). Prior
-deploy attempts got real credentials working, authenticated, built, and
-uploaded all static assets, but failed binding R2 with error code 10042
-until R2 was activated. This commit triggers the next real deploy
-attempt with R2 now active.
+**Status**: root cause of every prior failure found — the D1 database ID
+committed in `wrangler.jsonc` belonged to a DIFFERENT Cloudflare account
+than the one that actually owns this Worker (`9acb487ba7dffb5bdf65c0aabfd3bcb9`).
+A real database has now been created on the correct account
+(`tradesafe-africa-db`, id `b5722894-0f36-4858-9624-f49f08df3029`) and
+`wrangler.jsonc` updated to point at it; `CLOUDFLARE_API_TOKEN` was also
+replaced with one that actually has D1 permissions (the original
+"Edit Cloudflare Workers" template token doesn't grant D1 access at
+all — worth knowing if this ever needs redoing). R2 is enabled and
+working on that account. Still needed after this deploy succeeds:
+`npm run db:migrate:remote` against the new database — it exists but is
+schema-less until migrations run.
 
 ## 8. Rollback
 
