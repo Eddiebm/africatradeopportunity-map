@@ -292,6 +292,21 @@ SAME go-live checklist as `SESSION_SECRET`, not a follow-up task. Get
 both at dash.cloudflare.com → Turnstile → add a widget (see
 `lib/turnstile.ts`'s own header comment for exactly which key is which).
 
-No payment, identity-verification, or email-provider credentials are
-wired yet (see `lib/email.ts` and `docs/AUDIT.md`) — connecting a real
-provider means adding its secret here and to this table.
+| `RESEND_API_KEY` | `wrangler secret put RESEND_API_KEY` | `lib/email.ts` — real outbound email (verification links, password resets) via Resend |
+| `EMAIL_FROM` (optional) | `wrangler secret put EMAIL_FROM` | `lib/email.ts` — the verified "From" address; falls back to Resend's sandbox sender if unset (see below) |
+
+**Launch prep — Resend (account owner's choice): wired in, pending only the
+secret.** `lib/email.ts`'s `ResendEmailProvider` makes a real call to
+`https://api.resend.com/emails` and reports genuine success/failure (never
+fabricates `delivered: true`) — but `ConsoleEmailProvider` (logs, doesn't
+send) stays the only thing that actually runs until `RESEND_API_KEY` is
+set against the real account. Two things to know before relying on real
+delivery:
+- Until `EMAIL_FROM` is set to an address on a domain verified in the
+  Resend dashboard, sends use Resend's sandbox sender
+  (`onboarding@resend.dev`), which Resend will only actually deliver to
+  the Resend account owner's own address — real users won't receive
+  anything until a domain is verified and `EMAIL_FROM` points at it.
+- No payment or identity-verification-provider credentials are wired yet
+  (see `docs/AUDIT.md`) — connecting one means adding its secret here and
+  to this table, same as email.

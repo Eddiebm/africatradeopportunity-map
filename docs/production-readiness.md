@@ -2191,3 +2191,51 @@ account access:**
 real `wrangler deploy` (or a green CI run on `main` once the GitHub
 Actions secrets are set) — see `docs/DEPLOYMENT.md`'s "Secrets this app
 currently needs" table for exactly where each one goes.
+
+### Phase 9 — actual go-live: real deploy fixed, Resend wired in
+
+Prompted by "let us launch to public," continued past the previous
+session's account-level blocker. The Worker is now genuinely live at
+`https://tradesafe-africa.eddiebm.workers.dev` (see `docs/DEPLOYMENT.md`
+and `wrangler.jsonc`'s header for the account-mismatch root cause that
+blocked the first several deploy attempts and how it was fixed — missing
+GitHub Actions secrets, R2 never activated, then `wrangler.jsonc`'s
+`database_id` pointing at a D1 database on the wrong Cloudflare account).
+
+**Fixed this pass:**
+- `lib/email.ts`: real `ResendEmailProvider` (account owner's choice,
+  asked explicitly rather than assumed) — a genuine `fetch` call to
+  `https://api.resend.com/emails`, honest success/failure reporting
+  (never claims `delivered: true` unless Resend's response was actually
+  `ok`), exercised by real tests against a mocked `fetch`.
+  `ConsoleEmailProvider` stays the only thing that runs until
+  `RESEND_API_KEY` is actually set — same stopping-condition rule as
+  every other provider adapter in this app. `getEmailProvider()`
+  re-checks `RESEND_API_KEY`/`EMAIL_FROM` on every call (mirrors
+  `lib/whatsapp.ts`'s `getWhatsAppProvider()`), so setting or rotating
+  the secret takes effect on the next request, no redeploy required.
+  `worker/env.d.ts` and `.dev.vars.example` updated to match.
+
+**Automated checks:** `tsc` 0 errors · `lint` 0 errors (56 warnings,
+unchanged) · **266/266 tests** (4 new: `ConsoleEmailProvider` fallback
+when `RESEND_API_KEY` is unset — the actual state of this test worker;
+`ResendEmailProvider` sends the real request shape and reports
+`delivered: true` with the provider's message id on a 200; reports
+`delivered: false` with the actual HTTP status and Resend's rejection
+message on a non-2xx response; reports `delivered: false` — never
+fabricated as delivered — when the network request itself throws) ·
+`build` clean · `test:build-smoke` clean.
+
+**Remaining risk, updated from the entry above:** the functional gap is
+now "nobody has set `RESEND_API_KEY` against the real account yet," not
+"no provider exists" — code-complete, blocked only on the same kind of
+account-level step as `SESSION_SECRET`/Turnstile. Until a domain is
+verified in the Resend dashboard and `EMAIL_FROM` is set to an address on
+it, real delivery is capped at Resend's sandbox sender, which only
+reaches the Resend account owner's own inbox — see
+`docs/DEPLOYMENT.md`'s "Secrets this app currently needs" section for the
+exact caveat. The preview environment's D1 database is suspected to have
+the same wrong-account mismatch production had (see `wrangler.jsonc`'s
+`env.preview` comment) — not yet investigated, flagged as a non-blocking
+follow-up since no preview deploy has been attempted since the account
+was corrected.

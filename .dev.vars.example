@@ -34,3 +34,18 @@ WHATSAPP_WEBHOOK_SECRET=
 # stop real sends immediately (mid-incident, no redeploy) by setting this
 # to exactly "false". Leave unset (default: enabled).
 WHATSAPP_SENDS_ENABLED=
+
+# Launch-prep (docs/production-readiness.md): Resend API key, checked in
+# lib/email.ts's getEmailProvider(). Get a real one at resend.com -> API
+# Keys. Leave unset locally: with no key configured, ConsoleEmailProvider
+# stays active (the email is logged, not sent) — same honest fallback
+# every other provider adapter in this app uses.
+RESEND_API_KEY=
+
+# The verified "From" address Resend sends as, e.g.
+#   TradeSafe Africa <notifications@tradesafe.africa>
+# Leave unset locally/until a domain is verified in the Resend dashboard —
+# lib/email.ts falls back to Resend's own sandbox sender
+# (onboarding@resend.dev), which can only deliver to the Resend account
+# owner's own address, not to arbitrary real users.
+EMAIL_FROM=

@@ -46,6 +46,25 @@ interface Env {
    * Unset (default) means enabled.
    */
   WHATSAPP_SENDS_ENABLED: string;
+  /**
+   * Launch-prep (docs/production-readiness.md): Resend API key, checked in
+   * lib/email.ts's getEmailProvider(). Unset means ConsoleEmailProvider
+   * stays active (messages logged, not sent) — same honest,
+   * never-fabricate-around-a-missing-credential rule as every other
+   * provider adapter in this app. Set via `wrangler secret put
+   * RESEND_API_KEY` once the account owner has a real Resend account.
+   */
+  RESEND_API_KEY: string;
+  /**
+   * Launch-prep (docs/production-readiness.md): the verified "From" address
+   * Resend sends as, e.g. `TradeSafe Africa <notifications@tradesafe.africa>`.
+   * Unset falls back to Resend's own sandbox sender
+   * (`onboarding@resend.dev`), which only delivers to the Resend account
+   * owner's own address — set this to a real address on a domain verified
+   * in the Resend dashboard before expecting delivery to real users. See
+   * lib/email.ts's DEFAULT_EMAIL_FROM.
+   */
+  EMAIL_FROM: string;
 }
 
 declare namespace Cloudflare {
@@ -54,5 +73,7 @@ declare namespace Cloudflare {
     TURNSTILE_SECRET_KEY: string;
     WHATSAPP_WEBHOOK_SECRET: string;
     WHATSAPP_SENDS_ENABLED: string;
+    RESEND_API_KEY: string;
+    EMAIL_FROM: string;
   }
 }
