@@ -273,24 +273,16 @@ Priority 3.
 | `TURNSTILE_SECRET_KEY` | `wrangler secret put TURNSTILE_SECRET_KEY` | `lib/turnstile.ts` — server-side CAPTCHA verification for `/register` and `/api/market-requests` |
 | `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | build-time env var (not a Worker secret — see below) | Same two forms — renders the actual widget client-side |
 
-**⚠️ Production-hardening audit follow-up (PR review finding): Turnstile
-is a hard go-live blocker, not an optional nice-to-have — read this
-before the first real production deploy.** `lib/turnstile.ts`'s
-`turnstileEnforced()` is fail-closed by design once `NODE_ENV ===
-"production"` (the correct, intentional behavior — it's what stops a
-forgotten secret from silently disabling anti-abuse protection, the same
-"forgetting a secret must fail safe, not fail open" discipline this app
-applies everywhere else). The real consequence, stated plainly: **if
-`TURNSTILE_SECRET_KEY` is not set before the first production deploy,
-`POST /register` and `POST /api/market-requests` will return 400 for
-every real visitor**, not just bots — because `verifyTurnstile()` has no
-key to check a token against, `turnstileEnforced()` still requires a real
-pass in production, and no request can satisfy that. This must be set —
-and `NEXT_PUBLIC_TURNSTILE_SITE_KEY` provided as a build-time env var so
-the client widget actually renders a token to submit — as part of the
-SAME go-live checklist as `SESSION_SECRET`, not a follow-up task. Get
-both at dash.cloudflare.com → Turnstile → add a widget (see
-`lib/turnstile.ts`'s own header comment for exactly which key is which).
+**Production Worker `tradesafe-africa` (2026-09-13):** `SESSION_SECRET`
+and `TURNSTILE_SECRET_KEY` are set as Worker secrets.
+`NEXT_PUBLIC_TURNSTILE_SITE_KEY` is a GitHub Actions secret so CI can
+inline the widget on `/register`. Preview env still needs its own
+`SESSION_SECRET`. Rotate the Turnstile keys in the dashboard if they
+were ever pasted into chat.
+
+`lib/turnstile.ts`'s `turnstileEnforced()` is fail-closed in production:
+without those keys, `POST /register` and `POST /api/market-requests`
+return 400 for every visitor. Keep the keys on every production deploy.
 
 | `RESEND_API_KEY` | `wrangler secret put RESEND_API_KEY` | `lib/email.ts` — real outbound email (verification links, password resets) via Resend |
 | `EMAIL_FROM` (optional) | `wrangler secret put EMAIL_FROM` | `lib/email.ts` — the verified "From" address; falls back to Resend's sandbox sender if unset (see below) |
