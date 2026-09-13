@@ -72,11 +72,14 @@ export async function POST(request: Request) {
     expiresAt: minutesFromNow(60 * 24),
   });
   const origin = new URL(request.url).origin;
-  await getEmailProvider().send({
+  const emailSend = await getEmailProvider().send({
     to: email,
     subject: "Verify your TradeSafe Africa account",
     text: `Confirm your email to finish setting up your account:\n\n${origin}/verify-email?token=${rawToken}\n\nThis link expires in 24 hours. If you did not create this account, ignore this message.`,
   });
+  if (!emailSend.delivered) {
+    console.error("[email] register not delivered", emailSend.provider, emailSend.detail);
+  }
 
   const userAgent = request.headers.get("user-agent") ?? "";
   const { cookieValue } = await createSession(user.id, { ip, userAgent });
@@ -95,6 +98,7 @@ export async function POST(request: Request) {
   return Response.json(
     {
       user: { id: user.id, email: user.email, displayName: user.displayName, emailVerified: false },
+      email: { delivered: emailSend.delivered, provider: emailSend.provider },
     },
     { status: 201, headers: { "Set-Cookie": sessionCookieHeader(cookieValue, secure) } },
   );

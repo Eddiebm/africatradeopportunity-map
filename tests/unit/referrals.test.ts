@@ -253,6 +253,9 @@ describe("Priority 11 integration: registration and quote-request attribution", 
       email: `newuser+${crypto.randomUUID()}@example.com`, password: "CorrectHorse9!Battery", displayName: "New User", termsAccepted: true, ref: partner.code,
     }));
     expect(res.status).toBe(201);
+    const created = (await res.json()) as { email?: { delivered?: boolean; provider?: string } };
+    expect(created.email?.delivered).toBe(false);
+    expect(created.email?.provider).toBe("console");
     const attributions = await getDb().select().from(referralAttributions).where(eq(referralAttributions.referralPartnerId, partner.id));
     expect(attributions.length).toBe(1);
     expect(attributions[0].isPrimary).toBe(true);

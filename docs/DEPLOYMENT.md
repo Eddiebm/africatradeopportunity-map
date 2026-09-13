@@ -285,8 +285,10 @@ were ever pasted into chat.
 without those keys, `POST /register` and `POST /api/market-requests`
 return 400 for every visitor. Keep the keys on every production deploy.
 
-| `RESEND_API_KEY` | `wrangler secret put RESEND_API_KEY` | `lib/email.ts` — real outbound email (verification links, password resets) via Resend |
-| `EMAIL_FROM` (optional) | `wrangler secret put EMAIL_FROM` | `lib/email.ts` — the verified "From" address; falls back to Resend's sandbox sender if unset (see below) |
+| `RESEND_API_KEY` | GitHub Actions secret (preferred) or `wrangler secret put RESEND_API_KEY` | `lib/email.ts` — real outbound email (verification links, password resets) via Resend |
+| `EMAIL_FROM` (optional) | GitHub Actions secret or `wrangler secret put EMAIL_FROM` | `lib/email.ts` — the verified "From" address; falls back to Resend's sandbox sender if unset (see below) |
+
+**Do not paste API keys into chat.** Add `RESEND_API_KEY` (and later `EMAIL_FROM`) under the GitHub repo **Settings → Secrets and variables → Actions**. The deploy job on `main` pipes those values into the Worker with `wrangler secret put`. You can also run the **CI** workflow manually (`workflow_dispatch` on `main`) after saving the secrets, without a code push.
 
 **Launch prep — Resend (account owner's choice): wired in, pending only the
 secret.** `lib/email.ts`'s `ResendEmailProvider` makes a real call to

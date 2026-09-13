@@ -3,6 +3,7 @@ import { requireUser } from "../../lib/auth/current-user";
 import { getDb } from "../../db";
 import { deals } from "../../db/schema";
 import SignOutLink from "../components/SignOutLink";
+import { EmailUnverifiedNote } from "../components/EmailUnverifiedNote";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ export default async function Dashboard() {
   return <main className="portal">
     <header><div className="brand"><i>TS</i><span><b>TradeSafe Africa</b><small>Deal operations</small></span></div><nav><a href="/">Opportunity map</a><a href="/organizations">My organizations</a><a href="/marketplace">Matches</a><a href="/notifications">Notifications</a><a href="/deal/new">Open a deal</a><a href="/disputes">Disputes</a><a href="/account">Account</a><SignOutLink /></nav></header>
     <section className="portalhead"><div><p>MY TRADE DESK</p><h1>Deals requiring action</h1></div><aside><b>{rows.length}</b><span>active records</span></aside></section>
+    <EmailUnverifiedNote user={user} />
     <section className="dealboard">
       {rows.length ? rows.map((deal) => <a href={`/deal/${deal.id}`} className="dealcard" key={deal.id}>
         <div><i>{deal.reference}</i><b>{deal.stage.replaceAll("_", " ")}</b></div>

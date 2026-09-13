@@ -1,6 +1,7 @@
 import { requireUser } from "../../lib/auth/current-user";
 import SignOutLink from "../components/SignOutLink";
 import AccountDeletionPanel from "../components/AccountDeletionPanel";
+import { EmailUnverifiedNote } from "../components/EmailUnverifiedNote";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,7 @@ export default async function Account() {
       <section className="portalhead">
         <div><p>ACCOUNT SETTINGS</p><h1>{user.displayName || user.email}</h1></div>
       </section>
+      <EmailUnverifiedNote user={user} />
       <section className="portalempty">
         <h2>Download my data</h2>
         <p>

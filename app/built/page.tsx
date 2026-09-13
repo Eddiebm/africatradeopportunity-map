@@ -1,1 +1,72 @@
-export default function Built(){return <main className="built"><header><div className="brand"><i>TS</i><span><b>TradeSafe Africa</b><small>Product status</small></span></div><nav><a href="/">Atlas</a><a href="/marketplace">Marketplace</a><a href="/dashboard">My deals</a></nav></header><section className="answerPage"><p>STRAIGHT ANSWERS</p><h1>Was the code pushed to github/eddiebm?</h1><div className="shortAnswer noAnswer"><b>No.</b><span>The current code is stored in the private repository connected to this hosted site. It has not been pushed to the GitHub account <strong>github/eddiebm</strong>.</span></div><div className="answerGrid"><article><b>WHERE IT IS NOW</b><p>The complete working source is versioned in the site’s private source repository and is being used for the live deployment.</p></article><article><b>WHAT IS MISSING</b><p>There is not yet a confirmed GitHub repository under eddiebm containing this codebase.</p></article><article><b>WHAT HAPPENS NEXT</b><p>To place it there, create or select a repository under eddiebm, connect authorized GitHub access, and push the current source to that repository.</p></article></div><aside><b>Previous question: Is this app functional?</b><p>Yes—as a private MVP. The core software works, but it is not yet a fully operational public or regulated marketplace.</p></aside><a className="primaryLink" href="/marketplace">Open the marketplace →</a></section><footer><b>TradeSafe Africa</b><span>Status answers describe the current deployed version and its confirmed source location.</span></footer></main>}
+export default function Built() {
+  return (
+    <main className="built">
+      <header>
+        <div className="brand">
+          <i>TS</i>
+          <span>
+            <b>TradeSafe Africa</b>
+            <small>Product status</small>
+          </span>
+        </div>
+        <nav>
+          <a href="/">Atlas</a>
+          <a href="/marketplace">Marketplace</a>
+          <a href="/dashboard">My deals</a>
+        </nav>
+      </header>
+      <section className="answerPage">
+        <p>STRAIGHT ANSWERS</p>
+        <h1>Can strangers transact here?</h1>
+        <div className="shortAnswer noAnswer">
+          <b>No.</b>
+          <span>
+            Research and deal-prep tools are live at{" "}
+            <strong>tradesafe-africa.eddiebm.workers.dev</strong>. The product cannot yet hold
+            licensed money, run real KYC, or complete a verified shipment.
+          </span>
+        </div>
+        <div className="answerGrid">
+          <article>
+            <b>WORKING NOW</b>
+            <p>
+              Source is on GitHub at Eddiebm/africatradeopportunity-map. Accounts, sessions,
+              Turnstile, D1, and R2 are on the live Worker. You can open a desk after register or
+              sign-in.
+            </p>
+          </article>
+          <article>
+            <b>NOT WORKING YET</b>
+            <p>
+              Outbound email is not connected (<code>RESEND_API_KEY</code> unset), so verification
+              and password-reset messages are logged, not sent. There is no custom domain, no
+              licensed payment rail, and no identity-verification provider.
+            </p>
+          </article>
+          <article>
+            <b>WHAT IS NEXT</b>
+            <p>
+              Connect Resend (GitHub secret <code>RESEND_API_KEY</code>), then a real domain, then
+              one operated corridor with licensed money and real KYC. Do not treat a green CI run as
+              a finished public trade product.
+            </p>
+          </article>
+        </div>
+        <aside>
+          <b>Is the GitHub repo public under eddiebm?</b>
+          <p>
+            Yes — <a href="https://github.com/Eddiebm/africatradeopportunity-map">Eddiebm/africatradeopportunity-map</a>.
+            An older status note that said the code had not been pushed is wrong.
+          </p>
+        </aside>
+        <a className="primaryLink" href="/register">
+          Open a trade desk →
+        </a>
+      </section>
+      <footer>
+        <b>TradeSafe Africa</b>
+        <span>Status describes the deployed Worker, not a regulated marketplace.</span>
+      </footer>
+    </main>
+  );
+}

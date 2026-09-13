@@ -136,3 +136,8 @@ export function getEmailProvider(): EmailProvider {
   }
   return provider;
 }
+
+/** True only when a Resend API key is bound. Never reports delivery. */
+export function emailDeliveryLive(): boolean {
+  return Boolean((env.RESEND_API_KEY || "").trim());
+}

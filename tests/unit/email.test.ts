@@ -7,7 +7,7 @@
 // real behavior (a real request shape, real success/failure parsing)
 // without making a real network call to Resend.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getEmailProvider, ResendEmailProvider, DEFAULT_EMAIL_FROM } from "../../lib/email";
+import { getEmailProvider, ResendEmailProvider, DEFAULT_EMAIL_FROM, emailDeliveryLive } from "../../lib/email";
 
 describe("lib/email — ConsoleEmailProvider fallback", () => {
   it("getEmailProvider() falls back to console when RESEND_API_KEY is unset (as in this test worker)", async () => {
@@ -18,6 +18,7 @@ describe("lib/email — ConsoleEmailProvider fallback", () => {
     expect(result.delivered).toBe(false);
     expect(result.provider).toBe("console");
     expect(result.detail).toMatch(/no email provider is connected/i);
+    expect(emailDeliveryLive()).toBe(false);
   });
 });
 
