@@ -14,9 +14,7 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request: Request) {
   const ip = clientIp(request);
-  if (!(await consumeRateLimit(`register:${ip}`, 8, 3600))) {
-    return Response.json({ error: "Too many registration attempts. Try again later." }, { status: 429 });
-  }
+  const hostname = new URL(request.url).hostname;
 
   let body: Record<string, unknown>;
   try {
@@ -25,12 +23,17 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const turnstile = await verifyTurnstile(
-    turnstileTokenFromBody(body),
-    ip,
-    "signup",
-  );
+  const token = turnstileTokenFromBody(body);
+  if (!token && turnstileEnforced()) {
+    return Response.json({ error: "Complete the verification checkbox first." }, { status: 400 });
+  }
+  if (!(await consumeRateLimit(`register-v2:${ip}`, 20, 3600))) {
+    return Response.json({ error: "Too many registration attempts. Try again later." }, { status: 429 });
+  }
+
+  const turnstile = await verifyTurnstile(token, ip, "signup", hostname);
   if (!turnstile.success && turnstileEnforced()) {
+    console.error("[turnstile] register", turnstile.reason);
     return Response.json({ error: "Verification failed. Please try again." }, { status: 400 });
   }
 

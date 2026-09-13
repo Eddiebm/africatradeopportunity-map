@@ -1,6 +1,6 @@
 "use client";
 import { FormEvent, useRef, useState } from "react";
-import { TurnstileField, type TurnstileFieldHandle } from "../components/TurnstileField";
+import { TurnstileField, tokenFromTurnstile, type TurnstileFieldHandle } from "../components/TurnstileField";
 
 export default function ForgotPassword() {
   const [state, setState] = useState("");
@@ -8,15 +8,20 @@ export default function ForgotPassword() {
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setState("Checking…");
     const form = new FormData(e.currentTarget);
+    const turnstileToken = tokenFromTurnstile(turnstile.current, form);
+    if (!turnstileToken) {
+      setState("Complete the verification checkbox first.");
+      return;
+    }
+    setState("Checking…");
     try {
       const res = await fetch("/api/auth/request-password-reset", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           email: form.get("email"),
-          turnstileToken: form.get("cf-turnstile-response") || undefined,
+          turnstileToken,
         }),
       });
       const data = (await res.json()) as { message?: string; error?: string };

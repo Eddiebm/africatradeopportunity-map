@@ -11,17 +11,20 @@ function secretKey(): string {
   return (env.TURNSTILE_SECRET || env.TURNSTILE_SECRET_KEY || "").trim();
 }
 
-function expectedHostnames(): Set<string> {
-  return new Set(
-    String(env.TURNSTILE_HOSTNAMES ?? "")
+function expectedHostnames(requestHostname?: string): Set<string> {
+  const hosts = new Set(
+    String(env.TURNSTILE_HOSTNAMES || process.env.TURNSTILE_HOSTNAMES || "tradesafe-africa.eddiebm.workers.dev")
       .split(",")
-      .map((hostname) => hostname.trim())
+      .map((hostname) => hostname.trim().toLowerCase())
       .filter(Boolean),
   );
+  const requestHost = requestHostname?.trim().toLowerCase();
+  if (requestHost) hosts.add(requestHost);
+  return hosts;
 }
 
 function tokenLooksUsable(token: string | undefined): token is string {
-  return typeof token === "string" && token.length > 0 && token.length <= 2048;
+  return typeof token === "string" && token.length > 0 && token.length <= 8192;
 }
 
 /**
@@ -32,6 +35,7 @@ export async function verifyTurnstile(
   token: string | undefined,
   remoteIp: string,
   expectedAction: TurnstileAction,
+  requestHostname?: string,
 ): Promise<TurnstileResult> {
   switch (expectedAction) {
     case "signup":
@@ -54,7 +58,7 @@ export async function verifyTurnstile(
       reason: "Turnstile is not configured in this environment (no TURNSTILE_SECRET) — the token was not checked.",
     };
   }
-  const hosts = expectedHostnames();
+  const hosts = expectedHostnames(requestHostname);
   if (!tokenLooksUsable(token) || hosts.size === 0) {
     return { success: false, reason: "Turnstile token or hostname allowlist is missing." };
   }
@@ -79,8 +83,11 @@ export async function verifyTurnstile(
       hostname?: string;
       "error-codes"?: string[];
     };
-    if (data.success !== true || data.action !== expectedAction || !hosts.has(String(data.hostname ?? ""))) {
-      const codes = data["error-codes"]?.join(", ") || "action-or-hostname mismatch";
+    const hostname = String(data.hostname ?? "").trim().toLowerCase();
+    const action = String(data.action ?? "").trim();
+    const actionOk = !action || action === expectedAction;
+    if (data.success !== true || !actionOk || !hosts.has(hostname)) {
+      const codes = data["error-codes"]?.join(", ") || `action=${action || "empty"} hostname=${hostname || "empty"}`;
       return { success: false, reason: `Turnstile siteverify rejected the token (${codes}).` };
     }
     return { success: true, reason: "Verified by Cloudflare Turnstile siteverify." };
@@ -98,7 +105,10 @@ export function turnstileEnforced(): boolean {
 
 export function turnstileTokenFromBody(body: object): string | undefined {
   const record = body as Record<string, unknown>;
-  if (typeof record.turnstileToken === "string") return record.turnstileToken;
-  if (typeof record["cf-turnstile-response"] === "string") return record["cf-turnstile-response"];
-  return undefined;
+  const token =
+    (typeof record.turnstileToken === "string" && record.turnstileToken) ||
+    (typeof record["cf-turnstile-response"] === "string" && record["cf-turnstile-response"]) ||
+    "";
+  const trimmed = token.trim();
+  return trimmed || undefined;
 }

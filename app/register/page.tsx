@@ -1,6 +1,6 @@
 "use client";
 import { FormEvent, useRef, useState } from "react";
-import { TurnstileField, type TurnstileFieldHandle } from "../components/TurnstileField";
+import { TurnstileField, tokenFromTurnstile, type TurnstileFieldHandle } from "../components/TurnstileField";
 
 export default function Register() {
   const [state, setState] = useState("");
@@ -8,8 +8,13 @@ export default function Register() {
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setState("Creating your account…");
     const form = new FormData(e.currentTarget);
+    const turnstileToken = tokenFromTurnstile(turnstile.current, form);
+    if (!turnstileToken) {
+      setState("Complete the verification checkbox first.");
+      return;
+    }
+    setState("Creating your account…");
     try {
       const res = await fetch("/api/auth/register", {
         method: "POST",
@@ -19,7 +24,7 @@ export default function Register() {
           password: form.get("password"),
           displayName: form.get("displayName"),
           termsAccepted: form.get("termsAccepted") === "on",
-          turnstileToken: form.get("cf-turnstile-response") || undefined,
+          turnstileToken,
           ref: new URLSearchParams(window.location.search).get("ref") || undefined,
         }),
       });

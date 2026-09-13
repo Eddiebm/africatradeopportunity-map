@@ -26,7 +26,7 @@ export async function POST(req:Request){
     const isQuoteRequest=b.role==="quote_request";
     const required=isQuoteRequest?BASE_REQUIRED:[...BASE_REQUIRED,"origin","volume"];
     const action=b.role==="quote_request"?"quote":b.role==="protection_request"?"protect":"listing";
-    const turnstile=await verifyTurnstile(turnstileTokenFromBody(b),clientIp(req),action);
+    const turnstile=await verifyTurnstile(turnstileTokenFromBody(b),clientIp(req),action,new URL(req.url).hostname);
     if(!turnstile.success&&turnstileEnforced()) return Response.json({error:"Verification failed. Please try again."},{status:400});
     if(required.some(k=>!b[k]?.trim())) return Response.json({error:"Complete every required field."},{status:400});
     if(isQuoteRequest&&!b.consent) return Response.json({error:"Consent is required to submit this request."},{status:400});

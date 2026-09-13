@@ -13,9 +13,7 @@ const GENERIC_RESPONSE = { message: "If an account exists for that email, a rese
 
 export async function POST(request: Request) {
   const ip = clientIp(request);
-  if (!(await consumeRateLimit(`pwreset:${ip}`, 6, 3600))) {
-    return Response.json({ error: "Too many requests. Try again later." }, { status: 429 });
-  }
+  const hostname = new URL(request.url).hostname;
 
   let body: Record<string, unknown>;
   try {
@@ -23,8 +21,16 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
-  const turnstile = await verifyTurnstile(turnstileTokenFromBody(body), ip, "password-reset");
+  const token = turnstileTokenFromBody(body);
+  if (!token && turnstileEnforced()) {
+    return Response.json({ error: "Complete the verification checkbox first." }, { status: 400 });
+  }
+  if (!(await consumeRateLimit(`pwreset:${ip}`, 6, 3600))) {
+    return Response.json({ error: "Too many requests. Try again later." }, { status: 429 });
+  }
+  const turnstile = await verifyTurnstile(token, ip, "password-reset", hostname);
   if (!turnstile.success && turnstileEnforced()) {
+    console.error("[turnstile] password-reset", turnstile.reason);
     return Response.json({ error: "Verification failed. Please try again." }, { status: 400 });
   }
   const email = String(body.email ?? "").trim().toLowerCase();

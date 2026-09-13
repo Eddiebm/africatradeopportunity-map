@@ -1,6 +1,6 @@
 "use client";
 import { useRef, useState } from "react";
-import { TurnstileField, type TurnstileFieldHandle } from "../components/TurnstileField";
+import { TurnstileField, tokenFromTurnstile, type TurnstileFieldHandle } from "../components/TurnstileField";
 
 // Priority 9 (docs/production-readiness.md): "Design a low-friction quote
 // request flow ... No full account creation required before preliminary
@@ -30,6 +30,12 @@ export default function QuoteRequest() {
     setSubmitting(true);
     setState("Sending your request…");
     const body = Object.fromEntries(formData.entries());
+    const turnstileToken = tokenFromTurnstile(turnstile.current, formData);
+    if (!turnstileToken) {
+      setSubmitting(false);
+      setState("Complete the verification checkbox first.");
+      return;
+    }
     try {
       const ref = new URLSearchParams(window.location.search).get("ref") || undefined;
       const res = await fetch("/api/market-requests", {
@@ -39,7 +45,7 @@ export default function QuoteRequest() {
           ...body,
           role: "quote_request",
           ref,
-          turnstileToken: formData.get("cf-turnstile-response") || undefined,
+          turnstileToken,
         }),
       });
       const data = (await res.json()) as { error?: string };

@@ -27,11 +27,19 @@ declare global {
       render: (el: HTMLElement, opts: Record<string, unknown>) => string;
       reset: (id: string) => void;
       remove: (id: string) => void;
+      getResponse: (id: string) => string | undefined;
     };
   }
 }
 
-export type TurnstileFieldHandle = { reset: () => void };
+export type TurnstileFieldHandle = { reset: () => void; getToken: () => string };
+
+export function tokenFromTurnstile(
+  field: TurnstileFieldHandle | null,
+  form: FormData,
+): string {
+  return field?.getToken() || String(form.get("cf-turnstile-response") ?? "").trim();
+}
 
 export const TurnstileField = forwardRef<
   TurnstileFieldHandle,
@@ -39,6 +47,7 @@ export const TurnstileField = forwardRef<
 >(function TurnstileField({ action, onToken }, ref) {
   const box = useRef<HTMLDivElement>(null);
   const widgetId = useRef<string | null>(null);
+  const lastToken = useRef("");
   const onTokenRef = useRef(onToken);
   onTokenRef.current = onToken;
 
@@ -47,16 +56,33 @@ export const TurnstileField = forwardRef<
     widgetId.current = window.turnstile.render(box.current, {
       sitekey: SITEKEY,
       action,
-      callback: (token: string) => onTokenRef.current?.(token),
-      "expired-callback": () => onTokenRef.current?.(""),
-      "error-callback": () => onTokenRef.current?.(""),
+      "response-field": true,
+      "response-field-name": "cf-turnstile-response",
+      callback: (token: string) => {
+        lastToken.current = token;
+        onTokenRef.current?.(token);
+      },
+      "expired-callback": () => {
+        lastToken.current = "";
+        onTokenRef.current?.("");
+      },
+      "error-callback": () => {
+        lastToken.current = "";
+        onTokenRef.current?.("");
+      },
     });
   }, [action]);
 
   useImperativeHandle(ref, () => ({
     reset() {
+      lastToken.current = "";
       onTokenRef.current?.("");
       if (widgetId.current && window.turnstile) window.turnstile.reset(widgetId.current);
+    },
+    getToken() {
+      const live =
+        widgetId.current && window.turnstile ? window.turnstile.getResponse(widgetId.current) : "";
+      return (typeof live === "string" && live) || lastToken.current;
     },
   }));
 
@@ -79,7 +105,8 @@ export const TurnstileField = forwardRef<
         strategy="afterInteractive"
         onReady={notifyTurnstileReady}
       />
-      <div ref={box} className="cf-turnstile" data-action={action} />
+      {/* Explicit render: do not use class cf-turnstile (that triggers implicit scan). */}
+      <div ref={box} data-action={action} />
     </>
   );
 });

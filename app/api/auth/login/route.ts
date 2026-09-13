@@ -12,9 +12,7 @@ const INVALID_CREDENTIALS = { error: "Incorrect email or password." };
 export async function POST(request: Request) {
   const ip = clientIp(request);
   const userAgent = request.headers.get("user-agent") ?? "";
-  if (!(await consumeRateLimit(`login:${ip}`, 20, 900))) {
-    return Response.json({ error: "Too many sign-in attempts. Try again in a few minutes." }, { status: 429 });
-  }
+  const hostname = new URL(request.url).hostname;
 
   let body: Record<string, unknown>;
   try {
@@ -22,8 +20,16 @@ export async function POST(request: Request) {
   } catch {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
-  const turnstile = await verifyTurnstile(turnstileTokenFromBody(body), ip, "login");
+  const token = turnstileTokenFromBody(body);
+  if (!token && turnstileEnforced()) {
+    return Response.json({ error: "Complete the verification checkbox first." }, { status: 400 });
+  }
+  if (!(await consumeRateLimit(`login:${ip}`, 20, 900))) {
+    return Response.json({ error: "Too many sign-in attempts. Try again in a few minutes." }, { status: 429 });
+  }
+  const turnstile = await verifyTurnstile(token, ip, "login", hostname);
   if (!turnstile.success && turnstileEnforced()) {
+    console.error("[turnstile] login", turnstile.reason);
     return Response.json({ error: "Verification failed. Please try again." }, { status: 400 });
   }
   const email = String(body.email ?? "").trim().toLowerCase();

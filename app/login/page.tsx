@@ -1,6 +1,6 @@
 "use client";
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { TurnstileField, type TurnstileFieldHandle } from "../components/TurnstileField";
+import { TurnstileField, tokenFromTurnstile, type TurnstileFieldHandle } from "../components/TurnstileField";
 
 function returnTo(): string {
   if (typeof window === "undefined") return "/dashboard";
@@ -17,8 +17,13 @@ export default function Login() {
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setState("Signing in…");
     const form = new FormData(e.currentTarget);
+    const turnstileToken = tokenFromTurnstile(turnstile.current, form);
+    if (!turnstileToken) {
+      setState("Complete the verification checkbox first.");
+      return;
+    }
+    setState("Signing in…");
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
@@ -26,7 +31,7 @@ export default function Login() {
         body: JSON.stringify({
           email: form.get("email"),
           password: form.get("password"),
-          turnstileToken: form.get("cf-turnstile-response") || undefined,
+          turnstileToken,
         }),
       });
       let data: { error?: string } = {};
