@@ -1,5 +1,6 @@
 "use client";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { TurnstileField, type TurnstileFieldHandle } from "../components/TurnstileField";
 
 // Priority 9 (docs/production-readiness.md): "Design a low-friction quote
 // request flow ... No full account creation required before preliminary
@@ -23,29 +24,34 @@ export default function QuoteRequest() {
   const [state, setState] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
+  const turnstile = useRef<TurnstileFieldHandle>(null);
 
   async function submit(formData: FormData) {
     setSubmitting(true);
     setState("Sending your request…");
     const body = Object.fromEntries(formData.entries());
     try {
-      // Priority 11 (docs/production-readiness.md): a referral code
-      // carried from app/r/[code]/page.tsx's "Continue" link, if this
-      // visitor arrived via one.
       const ref = new URLSearchParams(window.location.search).get("ref") || undefined;
       const res = await fetch("/api/market-requests", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...body, role: "quote_request", ref }),
+        body: JSON.stringify({
+          ...body,
+          role: "quote_request",
+          ref,
+          turnstileToken: formData.get("cf-turnstile-response") || undefined,
+        }),
       });
       const data = (await res.json()) as { error?: string };
       if (res.ok) {
         setConfirmed(true);
         setState("");
       } else {
+        turnstile.current?.reset();
         setState(data.error || "Could not send your request. Please try again.");
       }
     } catch {
+      turnstile.current?.reset();
       setState("Could not send your request. Please try again.");
     } finally {
       setSubmitting(false);
@@ -149,6 +155,7 @@ export default function QuoteRequest() {
             this is not a binding quote or a guarantee of a transaction.
           </span>
         </label>
+        <TurnstileField ref={turnstile} action="quote" />
         <button type="submit" disabled={submitting}>{submitting ? "Sending…" : "Send my request →"}</button>
         {state && <strong>{state}</strong>}
         <p className="quotenote2">

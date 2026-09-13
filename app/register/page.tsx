@@ -1,47 +1,43 @@
 "use client";
-import { FormEvent, useState } from "react";
-import Script from "next/script";
-
-// Public site key for the Cloudflare Turnstile widget. Build-time only
-// (inlined via NEXT_PUBLIC_* — see vinext's env handling), empty by default.
-// No real Turnstile site is provisioned in this environment (no Cloudflare
-// dashboard access), so this defaults to "" and the widget below simply
-// doesn't render — the form still works, consistent with lib/turnstile.ts's
-// fail-open-when-unconfigured decision on the server side. Once a real
-// widget exists (dash.cloudflare.com -> Turnstile), set
-// NEXT_PUBLIC_TURNSTILE_SITE_KEY at build time to turn it on.
-const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY || "";
+import { FormEvent, useRef, useState } from "react";
+import { TurnstileField, type TurnstileFieldHandle } from "../components/TurnstileField";
 
 export default function Register() {
   const [state, setState] = useState("");
+  const turnstile = useRef<TurnstileFieldHandle>(null);
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setState("Creating your account…");
     const form = new FormData(e.currentTarget);
-    const res = await fetch("/api/auth/register", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        email: form.get("email"),
-        password: form.get("password"),
-        displayName: form.get("displayName"),
-        termsAccepted: form.get("termsAccepted") === "on",
-        // Cloudflare Turnstile injects this hidden input into the form
-        // itself once the widget below renders and the visitor completes
-        // the challenge; empty/absent when no site key is configured.
-        turnstileToken: form.get("cf-turnstile-response") || undefined,
-        // Priority 11 (docs/production-readiness.md): a referral code
-        // carried from app/r/[code]/page.tsx's "Register" link, if this
-        // visitor arrived via one — undefined (not attributed) otherwise.
-        ref: new URLSearchParams(window.location.search).get("ref") || undefined,
-      }),
-    });
-    const data = (await res.json()) as { error?: string };
-    if (res.ok) {
-      window.location.href = "/dashboard";
-    } else {
+    try {
+      const res = await fetch("/api/auth/register", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: form.get("email"),
+          password: form.get("password"),
+          displayName: form.get("displayName"),
+          termsAccepted: form.get("termsAccepted") === "on",
+          turnstileToken: form.get("cf-turnstile-response") || undefined,
+          ref: new URLSearchParams(window.location.search).get("ref") || undefined,
+        }),
+      });
+      let data: { error?: string } = {};
+      try {
+        data = (await res.json()) as { error?: string };
+      } catch {
+        data = { error: "Registration failed." };
+      }
+      if (res.ok) {
+        window.location.href = "/dashboard";
+        return;
+      }
+      turnstile.current?.reset();
       setState(data.error || "Registration failed.");
+    } catch {
+      turnstile.current?.reset();
+      setState("Registration failed.");
     }
   }
 
@@ -88,15 +84,7 @@ export default function Register() {
           I agree to the <a href="/legal/terms" target="_blank" rel="noreferrer">Terms of Service</a> and{" "}
           <a href="/legal/privacy" target="_blank" rel="noreferrer">Privacy Policy</a>.
         </label>
-        {TURNSTILE_SITE_KEY && (
-          <>
-            {/* Requires "https://challenges.cloudflare.com" added to the
-               CSP's script-src and frame-src in proxy.ts — not done in this
-               change; the widget will not load until that lands. */}
-            <Script src="https://challenges.cloudflare.com/turnstile/v0/api.js" strategy="afterInteractive" async defer />
-            <div className="cf-turnstile" data-sitekey={TURNSTILE_SITE_KEY} />
-          </>
-        )}
+        <TurnstileField ref={turnstile} action="signup" />
         <button type="submit">Create account →</button>
         <strong>{state}</strong>
         <span style={{ fontSize: 11 }}>

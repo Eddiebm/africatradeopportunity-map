@@ -17,14 +17,18 @@ interface Env {
   /** HMAC key (32+ random bytes, base64) signing the session cookie. */
   SESSION_SECRET: string;
   /**
-   * Cloudflare Turnstile secret key, used server-side to verify CAPTCHA
-   * tokens from public forms (registration, market-request posting). Get a
-   * real one at dash.cloudflare.com -> Turnstile. Unset/empty in this
-   * environment (no dashboard access yet) — see lib/turnstile.ts for how
-   * that is handled (verification is honestly reported as not-checked, and
-   * only enforced as a hard rejection in production builds).
+   * Cloudflare Turnstile secret. Spin's name is TURNSTILE_SECRET; this
+   * Worker already stores the dashboard widget secret as
+   * TURNSTILE_SECRET_KEY. lib/turnstile.ts accepts either.
    */
+  TURNSTILE_SECRET?: string;
   TURNSTILE_SECRET_KEY: string;
+  /**
+   * Comma-separated frontend hostnames siteverify must match. Production
+   * value is wrangler.jsonc `vars.TURNSTILE_HOSTNAMES` and must not include
+   * localhost.
+   */
+  TURNSTILE_HOSTNAMES: string;
   /**
    * Priority 10 (docs/production-readiness.md): a shared secret the
    * inbound WhatsApp webhook (app/api/webhooks/whatsapp/route.ts) checks
@@ -70,7 +74,9 @@ interface Env {
 declare namespace Cloudflare {
   interface Env {
     SESSION_SECRET: string;
+    TURNSTILE_SECRET?: string;
     TURNSTILE_SECRET_KEY: string;
+    TURNSTILE_HOSTNAMES: string;
     WHATSAPP_WEBHOOK_SECRET: string;
     WHATSAPP_SENDS_ENABLED: string;
     RESEND_API_KEY: string;

@@ -5,6 +5,7 @@ import { verifyPassword } from "../../../../lib/auth/password";
 import { clientIp, consumeRateLimit } from "../../../../lib/auth/rate-limit";
 import { createSession, sessionCookieHeader } from "../../../../lib/auth/session";
 import { logSecurityEvent } from "../../../../lib/auth/security-events";
+import { turnstileEnforced, turnstileTokenFromBody, verifyTurnstile } from "../../../../lib/turnstile";
 
 const INVALID_CREDENTIALS = { error: "Incorrect email or password." };
 
@@ -20,6 +21,10 @@ export async function POST(request: Request) {
     body = (await request.json()) as Record<string, unknown>;
   } catch {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
+  }
+  const turnstile = await verifyTurnstile(turnstileTokenFromBody(body), ip, "login");
+  if (!turnstile.success && turnstileEnforced()) {
+    return Response.json({ error: "Verification failed. Please try again." }, { status: 400 });
   }
   const email = String(body.email ?? "").trim().toLowerCase();
   const password = String(body.password ?? "");

@@ -6,7 +6,7 @@ import { clientIp, consumeRateLimit } from "../../../../lib/auth/rate-limit";
 import { createSession, sessionCookieHeader } from "../../../../lib/auth/session";
 import { generateRawToken, hashToken, minutesFromNow } from "../../../../lib/auth/tokens";
 import { getEmailProvider } from "../../../../lib/email";
-import { turnstileEnforced, verifyTurnstile } from "../../../../lib/turnstile";
+import { turnstileEnforced, turnstileTokenFromBody, verifyTurnstile } from "../../../../lib/turnstile";
 import { logSecurityEvent } from "../../../../lib/auth/security-events";
 import { recordReferralAttribution } from "../../../../lib/referrals";
 
@@ -26,8 +26,9 @@ export async function POST(request: Request) {
   }
 
   const turnstile = await verifyTurnstile(
-    typeof body.turnstileToken === "string" ? body.turnstileToken : undefined,
+    turnstileTokenFromBody(body),
     ip,
+    "signup",
   );
   if (!turnstile.success && turnstileEnforced()) {
     return Response.json({ error: "Verification failed. Please try again." }, { status: 400 });

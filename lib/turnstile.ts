@@ -1,74 +1,89 @@
-// Provider-adapter for Cloudflare Turnstile (bot-protection CAPTCHA) on
-// public forms. Mirrors the payment-provider-adapter pattern the product
-// requires (see lib/email.ts): the app never claims to have verified
-// something it did not actually check, and the interface is stable
-// regardless of whether a real Turnstile site is connected yet.
-//
-// No real Turnstile site/secret key is provisioned in this environment (no
-// Cloudflare dashboard access) — this file builds the real, correctly-wired
-// integration point, not a working end-to-end CAPTCHA.
-//
-// To connect a real widget: create a Turnstile site at
-// dash.cloudflare.com -> Turnstile, then:
-//   - `wrangler secret put TURNSTILE_SECRET_KEY` (every real environment)
-//   - set NEXT_PUBLIC_TURNSTILE_SITE_KEY (build-time, public) so the client
-//     widget renders — see app/register/page.tsx / app/page.tsx.
 import { env } from "cloudflare:workers";
+import type { TurnstileAction } from "./turnstile-actions";
+
+export type { TurnstileAction } from "./turnstile-actions";
 
 export type TurnstileResult = { success: boolean; reason: string };
 
 const VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
-/**
- * Verifies a Turnstile token against Cloudflare's siteverify API.
- *
- * IMPORTANT — this function never fabricates a pass. If there is no secret
- * key configured, or no token was submitted, it returns success:false with
- * a reason that says so plainly: the token was NOT checked, so the result
- * cannot honestly be "verified". Returning {success:true} in that situation
- * would make the audit trail lie about what was actually reviewed (the same
- * ethic app/admin/page.tsx's footer states for evidence review generally).
- *
- * Whether an honest "not verified" result should actually BLOCK the request
- * is a separate policy decision — see `turnstileEnforced()` below — because
- * this environment has no real secret key yet, and failing closed on every
- * local/CI request would make registration and listing-posting permanently
- * broken here. Callers must check `turnstileEnforced()` alongside
- * `result.success`; they must not treat `success:false` alone as "reject".
- */
-export async function verifyTurnstile(token: string | undefined, remoteIp: string): Promise<TurnstileResult> {
-  const secretKey = env.TURNSTILE_SECRET_KEY;
+function secretKey(): string {
+  return (env.TURNSTILE_SECRET || env.TURNSTILE_SECRET_KEY || "").trim();
+}
 
-  if (!secretKey) {
+function expectedHostnames(): Set<string> {
+  return new Set(
+    String(env.TURNSTILE_HOSTNAMES ?? "")
+      .split(",")
+      .map((hostname) => hostname.trim())
+      .filter(Boolean),
+  );
+}
+
+function tokenLooksUsable(token: string | undefined): token is string {
+  return typeof token === "string" && token.length > 0 && token.length <= 2048;
+}
+
+/**
+ * Canonical Siteverify: browser token → this Worker → Cloudflare.
+ * Requires success, the expected widget action, and an allowlisted hostname.
+ */
+export async function verifyTurnstile(
+  token: string | undefined,
+  remoteIp: string,
+  expectedAction: TurnstileAction,
+): Promise<TurnstileResult> {
+  switch (expectedAction) {
+    case "signup":
+    case "login":
+    case "password-reset":
+    case "listing":
+    case "protect":
+    case "quote":
+      break;
+    default: {
+      const _exhaustive: never = expectedAction;
+      return { success: false, reason: `Unknown Turnstile action: ${String(_exhaustive)}` };
+    }
+  }
+
+  const secret = secretKey();
+  if (!secret) {
     return {
       success: false,
-      reason: "Turnstile is not configured in this environment (no TURNSTILE_SECRET_KEY) — the token was not checked.",
+      reason: "Turnstile is not configured in this environment (no TURNSTILE_SECRET) — the token was not checked.",
     };
   }
-  if (!token) {
-    return { success: false, reason: "No Turnstile token was submitted with the request." };
+  const hosts = expectedHostnames();
+  if (!tokenLooksUsable(token) || hosts.size === 0) {
+    return { success: false, reason: "Turnstile token or hostname allowlist is missing." };
   }
-
-  const params = new URLSearchParams();
-  params.set("secret", secretKey);
-  params.set("response", token);
-  if (remoteIp && remoteIp !== "unknown") params.set("remoteip", remoteIp);
 
   try {
     const res = await fetch(VERIFY_URL, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: params,
+      signal: AbortSignal.timeout(10_000),
+      body: new URLSearchParams({
+        secret,
+        response: token,
+        ...(remoteIp && remoteIp !== "unknown" ? { remoteip: remoteIp } : {}),
+      }),
     });
     if (!res.ok) {
       return { success: false, reason: `Turnstile siteverify request failed (HTTP ${res.status}).` };
     }
-    const data = (await res.json()) as { success?: boolean; "error-codes"?: string[] };
-    if (data.success === true) {
-      return { success: true, reason: "Verified by Cloudflare Turnstile siteverify." };
+    const data = (await res.json()) as {
+      success?: boolean;
+      action?: string;
+      hostname?: string;
+      "error-codes"?: string[];
+    };
+    if (data.success !== true || data.action !== expectedAction || !hosts.has(String(data.hostname ?? ""))) {
+      const codes = data["error-codes"]?.join(", ") || "action-or-hostname mismatch";
+      return { success: false, reason: `Turnstile siteverify rejected the token (${codes}).` };
     }
-    const codes = data["error-codes"]?.join(", ") || "unspecified";
-    return { success: false, reason: `Turnstile siteverify rejected the token (${codes}).` };
+    return { success: true, reason: "Verified by Cloudflare Turnstile siteverify." };
   } catch (err) {
     return {
       success: false,
@@ -77,32 +92,13 @@ export async function verifyTurnstile(token: string | undefined, remoteIp: strin
   }
 }
 
-/**
- * Fail-open/fail-closed policy for the *unconfigured* case.
- *
- * Enforcement (i.e. an unsuccessful verifyTurnstile() result actually
- * rejects the request with 400) is ON whenever either is true:
- *   - a real TURNSTILE_SECRET_KEY is configured — verification genuinely
- *     ran, so an honest failure must block the request; or
- *   - this is a production build (`process.env.NODE_ENV === "production"`,
- *     the standard Next/vinext build-time flag — "production" for
- *     `vinext build`/deploy, "development" for `vinext dev`, "test" under
- *     vitest; inlined at build time, so this is a compile-time constant in
- *     the deployed Worker, not a runtime env lookup).
- *
- * Enforcement is OFF only when neither is true: no secret key AND not a
- * production build. That is exactly this environment's current state (no
- * Cloudflare dashboard access, so no real key exists yet) — local dev, CI,
- * and preview builds without a configured key must not be permanently
- * blocked from registering a user or posting a classified. This does NOT
- * make verifyTurnstile() report success; it stays honestly false. It only
- * means the caller chooses not to reject on that honest "not checked"
- * result while running as a non-production build with no key.
- *
- * Net effect: a production deploy that forgets to set the secret fails
- * CLOSED (protects the most abuse-prone endpoints by default); a
- * dev/CI/test run with no key fails OPEN (stays usable).
- */
 export function turnstileEnforced(): boolean {
-  return Boolean(env.TURNSTILE_SECRET_KEY) || process.env.NODE_ENV === "production";
+  return Boolean(secretKey()) || process.env.NODE_ENV === "production";
+}
+
+export function turnstileTokenFromBody(body: object): string | undefined {
+  const record = body as Record<string, unknown>;
+  if (typeof record.turnstileToken === "string") return record.turnstileToken;
+  if (typeof record["cf-turnstile-response"] === "string") return record["cf-turnstile-response"];
+  return undefined;
 }

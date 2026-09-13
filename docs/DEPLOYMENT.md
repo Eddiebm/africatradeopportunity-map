@@ -270,8 +270,9 @@ Priority 3.
 | Secret | Set with | Used by |
 |---|---|---|
 | `SESSION_SECRET` | `wrangler secret put SESSION_SECRET` | `lib/auth/session.ts` — signs the session cookie |
-| `TURNSTILE_SECRET_KEY` | `wrangler secret put TURNSTILE_SECRET_KEY` | `lib/turnstile.ts` — server-side CAPTCHA verification for `/register` and `/api/market-requests` |
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | build-time env var (not a Worker secret — see below) | Same two forms — renders the actual widget client-side |
+| `TURNSTILE_SECRET` / `TURNSTILE_SECRET_KEY` | Worker secret (`TURNSTILE_SECRET_KEY` already set on production) | `lib/turnstile.ts` — canonical siteverify for signup, login, password-reset, listing, protect, quote |
+| `TURNSTILE_HOSTNAMES` | wrangler.jsonc `vars` (production must not include localhost) | Same — hostname allowlist returned by siteverify |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | build-time env var (GitHub Actions secret) | Public widget site key `0x4AAAAAAEyli_jivDIa7jYt` |
 
 **Production Worker `tradesafe-africa` (2026-09-13):** `SESSION_SECRET`
 and `TURNSTILE_SECRET_KEY` are set as Worker secrets.

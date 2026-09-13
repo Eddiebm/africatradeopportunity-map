@@ -29,9 +29,10 @@
   //      10042 until that one-time dashboard step was done).
   //   3. done (production Worker tradesafe-africa, 2026-09-13) —
   //      SESSION_SECRET and TURNSTILE_SECRET_KEY are set as Worker
-  //      secrets. NEXT_PUBLIC_TURNSTILE_SITE_KEY is a GitHub Actions
-  //      secret (build-time; this deploy is what bakes the widget into
-  //      /register). Still NOT done: RESEND_API_KEY / EMAIL_FROM.
+  //      secrets. TURNSTILE_HOSTNAMES is a wrangler var. The public
+  //      site key is inlined at build time via NEXT_PUBLIC_TURNSTILE_SITE_KEY
+  //      with a matching fallback in TurnstileField. Still NOT done:
+  //      RESEND_API_KEY / EMAIL_FROM.
   //   4. IN PROGRESS — CI's deploy job (CLOUDFLARE_API_TOKEN +
   //      CLOUDFLARE_ACCOUNT_ID as GitHub Actions secrets) now targets
   //      the correct account and a real database_id; migrations for
@@ -76,6 +77,12 @@
 
   "observability": {
     "enabled": true
+  },
+
+  // Public frontend hostnames Turnstile siteverify must match. Production
+  // must not include localhost — local allowlist lives in .dev.vars.
+  "vars": {
+    "TURNSTILE_HOSTNAMES": "tradesafe-africa.eddiebm.workers.dev"
   },
 
   // Refreshes db/schema.ts's intelligenceWatchlist (see

@@ -1,5 +1,6 @@
 "use client";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { TurnstileField, type TurnstileFieldHandle } from "../components/TurnstileField";
 
 function returnTo(): string {
   if (typeof window === "undefined") return "/dashboard";
@@ -11,22 +12,38 @@ function returnTo(): string {
 export default function Login() {
   const [state, setState] = useState("");
   const [dest, setDest] = useState("/dashboard");
+  const turnstile = useRef<TurnstileFieldHandle>(null);
   useEffect(() => setDest(returnTo()), []);
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setState("Signing in…");
     const form = new FormData(e.currentTarget);
-    const res = await fetch("/api/auth/login", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email: form.get("email"), password: form.get("password") }),
-    });
-    const data = (await res.json()) as { error?: string };
-    if (res.ok) {
-      window.location.href = dest;
-    } else {
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: form.get("email"),
+          password: form.get("password"),
+          turnstileToken: form.get("cf-turnstile-response") || undefined,
+        }),
+      });
+      let data: { error?: string } = {};
+      try {
+        data = (await res.json()) as { error?: string };
+      } catch {
+        data = { error: "Sign in failed." };
+      }
+      if (res.ok) {
+        window.location.href = dest;
+        return;
+      }
+      turnstile.current?.reset();
       setState(data.error || "Sign in failed.");
+    } catch {
+      turnstile.current?.reset();
+      setState("Sign in failed.");
     }
   }
 
@@ -67,6 +84,7 @@ export default function Login() {
           Password
           <input name="password" type="password" required autoComplete="current-password" minLength={10} />
         </label>
+        <TurnstileField ref={turnstile} action="login" />
         <button type="submit">Sign in →</button>
         <strong>{state}</strong>
         <span style={{ fontSize: 11 }}>

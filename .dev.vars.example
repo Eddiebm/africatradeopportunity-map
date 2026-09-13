@@ -6,17 +6,16 @@
 #   openssl rand -base64 32
 SESSION_SECRET=replace-with-a-random-32-byte-base64-value
 
-# Cloudflare Turnstile secret key (server-side), used to verify CAPTCHA
-# tokens submitted by public forms (registration, market-request posting).
-# Get a real one at dash.cloudflare.com -> Turnstile -> add a widget ->
-# copy the "Secret Key" (the "Site Key" is separate and public — that one
-# is NEXT_PUBLIC_TURNSTILE_SITE_KEY, a build-time client var, not a
-# .dev.vars secret; see lib/turnstile.ts).
-# Defaults to unset/empty locally: with no key configured, verification is
-# honestly reported as "not checked" (never faked as passed) and is not
-# enforced as a hard rejection outside of production builds — see
-# lib/turnstile.ts's turnstileEnforced() for the exact fail-open/closed rule.
+# Cloudflare Turnstile secret (server-side). Spin's name is TURNSTILE_SECRET;
+# production already has TURNSTILE_SECRET_KEY on the Worker. Either works.
+# The public site key is NEXT_PUBLIC_TURNSTILE_SITE_KEY (build-time, not a
+# .dev.vars secret). Leave the secret empty locally to fail-open outside
+# production — see lib/turnstile.ts.
+TURNSTILE_SECRET=
 TURNSTILE_SECRET_KEY=
+# Local siteverify hostname allowlist. Production is set in wrangler.jsonc
+# vars and must not include localhost.
+TURNSTILE_HOSTNAMES=localhost,127.0.0.1
 
 # Priority 10: shared secret the inbound WhatsApp webhook checks against a
 # request header before trusting the payload. No real WhatsApp Business

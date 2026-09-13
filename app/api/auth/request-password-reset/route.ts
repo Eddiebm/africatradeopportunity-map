@@ -5,6 +5,7 @@ import { clientIp, consumeRateLimit } from "../../../../lib/auth/rate-limit";
 import { generateRawToken, hashToken, minutesFromNow } from "../../../../lib/auth/tokens";
 import { getEmailProvider } from "../../../../lib/email";
 import { logSecurityEvent } from "../../../../lib/auth/security-events";
+import { turnstileEnforced, turnstileTokenFromBody, verifyTurnstile } from "../../../../lib/turnstile";
 
 // Always returns the same generic message, whether or not the address is
 // registered — never let this endpoint confirm which emails have accounts.
@@ -21,6 +22,10 @@ export async function POST(request: Request) {
     body = (await request.json()) as Record<string, unknown>;
   } catch {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
+  }
+  const turnstile = await verifyTurnstile(turnstileTokenFromBody(body), ip, "password-reset");
+  if (!turnstile.success && turnstileEnforced()) {
+    return Response.json({ error: "Verification failed. Please try again." }, { status: 400 });
   }
   const email = String(body.email ?? "").trim().toLowerCase();
   if (!email) return Response.json({ error: "Enter your email address." }, { status: 400 });
