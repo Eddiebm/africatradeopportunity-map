@@ -90,6 +90,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
+          TIMESFM_TOKEN: ${{ secrets.TIMESFM_TOKEN }}
         run: |
           set +x
           if [ -n "$RESEND_API_KEY" ]; then
@@ -99,4 +100,9 @@ jobs:
           fi
           if [ -n "$EMAIL_FROM" ]; then
             printf '%s' "$EMAIL_FROM" | ./node_modules/.bin/wrangler secret put EMAIL_FROM
+          fi
+          if [ -n "$TIMESFM_TOKEN" ]; then
+            printf '%s' "$TIMESFM_TOKEN" | ./node_modules/.bin/wrangler secret put TIMESFM_TOKEN
+          else
+            echo "TIMESFM_TOKEN is not a GitHub secret — the TimesFM forecast stays hidden."
           fi

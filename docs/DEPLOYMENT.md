@@ -316,7 +316,7 @@ from this app); `lib/timesfm.ts` is the only client.
 | Name | Where | Used by |
 | --- | --- | --- |
 | `TIMESFM_URL` | `vars` in `wrangler.jsonc` (public, not a secret) | `lib/timesfm.ts` |
-| `TIMESFM_TOKEN` | `wrangler secret put TIMESFM_TOKEN` | `lib/timesfm.ts` — bearer token the service requires |
+| `TIMESFM_TOKEN` | GitHub Actions secret (preferred; the deploy job on `main` pipes it to the Worker) or `wrangler secret put TIMESFM_TOKEN` | `lib/timesfm.ts` — bearer token the service requires |
 
 Until `TIMESFM_TOKEN` exists, the page omits the forecast and everything
 else behaves as before. The service is called server-side only; the token
