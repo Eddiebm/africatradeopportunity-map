@@ -30,6 +30,7 @@ export default defineConfig({
             // (prod) — both external to a clean checkout, so CI needs this
             // set explicitly rather than relying on `.dev.vars` existing.
             SESSION_SECRET: "test-only-session-secret-do-not-use-in-prod",
+            TIMESFM_TOKEN: "test-only-timesfm-token",
             TEST_MIGRATIONS: migrations,
           },
         },

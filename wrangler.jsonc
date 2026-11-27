@@ -81,8 +81,15 @@
 
   // Public frontend hostnames Turnstile siteverify must match. Production
   // must not include localhost — local allowlist lives in .dev.vars.
+  //
+  // TIMESFM_URL is the public base URL of the TimesFM forecasting service
+  // (a separate Worker + container, see docs/DEPLOYMENT.md). It is not a
+  // secret; the matching TIMESFM_TOKEN bearer token is, and is set with
+  // `wrangler secret put TIMESFM_TOKEN`. Until that secret exists the
+  // import-intelligence page simply omits the TimesFM forecast.
   "vars": {
-    "TURNSTILE_HOSTNAMES": "tradesafe-africa.eddiebm.workers.dev"
+    "TURNSTILE_HOSTNAMES": "tradesafe-africa.eddiebm.workers.dev",
+    "TIMESFM_URL": "https://timesfm-api.eddie-781pagesdev.workers.dev"
   },
 
   // Refreshes db/schema.ts's intelligenceWatchlist (see

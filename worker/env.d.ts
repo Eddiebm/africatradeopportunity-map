@@ -69,6 +69,13 @@ interface Env {
    * lib/email.ts's DEFAULT_EMAIL_FROM.
    */
   EMAIL_FROM: string;
+  /**
+   * Bearer token for the TimesFM forecasting service (lib/timesfm.ts).
+   * TIMESFM_URL is a plain var in wrangler.jsonc. Unset means the
+   * import-intelligence page omits the TimesFM forecast; nothing else
+   * depends on it.
+   */
+  TIMESFM_TOKEN?: string;
 }
 
 declare namespace Cloudflare {
@@ -81,5 +88,6 @@ declare namespace Cloudflare {
     WHATSAPP_SENDS_ENABLED: string;
     RESEND_API_KEY: string;
     EMAIL_FROM: string;
+    TIMESFM_TOKEN?: string;
   }
 }

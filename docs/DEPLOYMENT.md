@@ -305,3 +305,26 @@ delivery:
 - No payment or identity-verification-provider credentials are wired yet
   (see `docs/AUDIT.md`) — connecting one means adding its secret here and
   to this table, same as email.
+
+## TimesFM forecast (optional)
+
+The import-intelligence page can show a statistical forecast from Google
+Research's TimesFM model next to the existing heuristic outlook. The model
+runs as its own service (a Worker fronting a container, deployed separately
+from this app); `lib/timesfm.ts` is the only client.
+
+| Name | Where | Used by |
+| --- | --- | --- |
+| `TIMESFM_URL` | `vars` in `wrangler.jsonc` (public, not a secret) | `lib/timesfm.ts` |
+| `TIMESFM_TOKEN` | GitHub Actions secret (preferred; the deploy job on `main` pipes it to the Worker) or `wrangler secret put TIMESFM_TOKEN` | `lib/timesfm.ts` — bearer token the service requires |
+
+Until `TIMESFM_TOKEN` exists, the page omits the forecast and everything
+else behaves as before. The service is called server-side only; the token
+never reaches the browser. This Worker and the model service live in
+different Cloudflare accounts, so the service is called by its public URL
+rather than through a service binding.
+
+TimesFM needs at least 8 reported annual values. A country/product pair with
+a shorter history gets the heuristic outlook only, with a note saying why.
+The 80% range shown is the model's 10th to 90th percentile for the single
+forecast year.
