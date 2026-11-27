@@ -32,11 +32,11 @@ interface ScheduledEvent {
 }
 
 // Batch size chosen to comfortably fit a Worker's CPU-time and subrequest
-// limits for one Cron invocation (each entry does up to ~5 upstream
+// limits for one Cron invocation (each entry does ~30 upstream
 // fetches). The watchlist only grows as fast as real users generate
 // lookups (see lib/trade-intelligence.ts), so this catches up over
 // successive daily ticks rather than needing to process everything at once.
-const WATCHLIST_REFRESH_BATCH_SIZE = 15;
+const WATCHLIST_REFRESH_BATCH_SIZE = 5;
 
 // Image security config. SVG sources with .svg extension auto-skip the
 // optimization endpoint on the client side (served directly, no proxy).

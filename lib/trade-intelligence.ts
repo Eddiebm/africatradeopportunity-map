@@ -12,6 +12,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "../db";
 import { intelligenceWatchlist, sourceRecords, tradeIntelligenceSnapshots } from "../db/schema";
 import { africanComtradeCodes, comtradeCodeByName, iso2ByName } from "./africa-countries";
+import { forecastAnnualImports, type TimesfmOutlook } from "./timesfm";
 
 type Row = { period?: string | number; primaryValue?: number; netWgt?: number; cmdDesc?: string; isReported?: boolean; partnerCode?: number; partnerDesc?: string };
 
@@ -21,6 +22,8 @@ export type ImportIntelligence = {
   product: string;
   annual: Array<{ period: string; value: number; netWeightKg: number; status: string }>;
   current: { year: number; monthsReported: number; value: number; annualizedValue: number; status: string };
+  /** Optional: snapshots cached before TimesFM existed do not carry it. */
+  timesfm?: TimesfmOutlook;
   outlook: { nextYear: number; value: number; direction: string; growthRate: number; confidence: number; method: string; drivers: { populationGrowth: { value: number; period: string; url: string }; gdpGrowth: { value: number; period: string; url: string } } };
   supply: { period: number; worldImports: number; africanSuppliers: Array<{ country: string; value: number; netWeightKg: number; share: number; status: string }>; status: string };
   sources: Array<{ name: string; type: string; url: string }>;
@@ -29,16 +32,42 @@ export type ImportIntelligence = {
 };
 
 const SNAPSHOT_FRESH_MS = 24 * 60 * 60 * 1000; // trade data doesn't move intraday
+// A snapshot whose TimesFM forecast failed (cold container, outage) is only
+// worth serving briefly, so the next lookup can try the model again without
+// waiting out a full day.
+const SNAPSHOT_RETRY_TIMESFM_MS = 15 * 60 * 1000;
+// Older years feed the TimesFM series only; the page and the heuristic
+// outlook keep using the most recent DISPLAY_YEARS, exactly as before.
+const DISPLAY_YEARS = 6;
+const HISTORY_YEARS = 14;
+// UN Comtrade's public preview API allows one period per request and
+// rate-limits aggressively (HTTP 429 with "Try again in N seconds").
+const COMTRADE_CONCURRENCY = 3;
+const COMTRADE_ATTEMPTS = 5;
+const COMTRADE_MAX_WAIT_MS = 5000;
+const SOURCE_RECORDS_PER_INSERT = 6;
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 const endpoint = (frequency: "A" | "M", period: string, reporter: string, hs: string) =>
-  `https://comtradeapi.un.org/public/v1/preview/C/${frequency}/HS?period=${period}&reporterCode=${reporter}&partnerCode=0&partner2Code=0&flowCode=M&cmdCode=${hs}&customsCode=C00&motCode=0&maxRecords=500&aggregateBy=6&breakdownMode=classic&includeDesc=true`;
+  `https://comtradeapi.un.org/public/v1/preview/C/${frequency}/HS?period=${period}&reporterCode=${reporter}&partnerCode=0&partner2Code=0&flowCode=M&cmdCode=${hs}&customsCode=C00&motCode=0&maxRecords=500&includeDesc=true`;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const retryDelayMs = (body: string) => {
+  const seconds = Number(/in (\d+) second/.exec(body)?.[1]);
+  return Math.min(COMTRADE_MAX_WAIT_MS, (Number.isFinite(seconds) && seconds > 0 ? seconds : 1) * 1000 + 250);
+};
 
 async function rows(url: string): Promise<Row[]> {
-  const response = await fetch(url, { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error("source unavailable");
-  const data = (await response.json()) as { data?: Row[] };
-  return data.data || [];
+  for (let attempt = 1; ; attempt++) {
+    const response = await fetch(url, { headers: { accept: "application/json" } });
+    if (response.status === 429 && attempt < COMTRADE_ATTEMPTS) {
+      await sleep(retryDelayMs(await response.text()));
+      continue;
+    }
+    if (!response.ok) throw new Error("source unavailable");
+    const data = (await response.json()) as { data?: Row[] };
+    return data.data || [];
+  }
 }
 async function optionalRows(url: string): Promise<Row[]> {
   try {
@@ -47,6 +76,30 @@ async function optionalRows(url: string): Promise<Row[]> {
     return [];
   }
 }
+
+type PeriodRows = { period: string; rows: Row[]; failed: boolean };
+
+/** One request per period (the preview API's limit), a few at a time. A
+ * period that still fails after retries is reported as failed rather than
+ * silently treated as "nothing reported". */
+async function rowsByPeriod(frequency: "A" | "M", periods: string[], reporter: string, hs: string): Promise<PeriodRows[]> {
+  const results: PeriodRows[] = new Array(periods.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < periods.length) {
+      const index = next++;
+      const period = periods[index];
+      try {
+        results[index] = { period, rows: await rows(endpoint(frequency, period, reporter, hs)), failed: false };
+      } catch {
+        results[index] = { period, rows: [], failed: true };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(COMTRADE_CONCURRENCY, periods.length) }, worker));
+  return results;
+}
+
 async function indicator(iso2: string, code: string): Promise<{ value: number; period: string; url: string }> {
   try {
     const url = `https://api.worldbank.org/v2/country/${iso2}/indicator/${code}?format=json&per_page=8`;
@@ -67,25 +120,33 @@ async function computeImportIntelligence(country: string, hs: string): Promise<I
   const iso2 = iso2ByName[country];
   const year = new Date().getUTCFullYear();
   const completedMonth = new Date().getUTCMonth();
-  const annualYears = Array.from({ length: 6 }, (_, i) => String(year - 6 + i));
+  const historyYears = Array.from({ length: HISTORY_YEARS }, (_, i) => String(year - HISTORY_YEARS + i));
   const monthlyPeriods = Array.from({ length: Math.max(0, completedMonth) }, (_, i) => `${year}${String(i + 1).padStart(2, "0")}`);
 
-  const annualUrl = endpoint("A", annualYears.join(","), reporter, hs);
-  const monthlyUrl = monthlyPeriods.length ? endpoint("M", monthlyPeriods.join(","), reporter, hs) : "";
-  const partnerUrl = `https://comtradeapi.un.org/public/v1/preview/C/A/HS?period=${year - 1}&reporterCode=${reporter}&partnerCode=all&flowCode=M&cmdCode=${hs}&maxRecords=500&includeDesc=true`;
+  const annualUrl = endpoint("A", String(year - 1), reporter, hs);
+  const partnerUrl = `https://comtradeapi.un.org/public/v1/preview/C/A/HS?period=${year - 1}&reporterCode=${reporter}&flowCode=M&cmdCode=${hs}&maxRecords=500&includeDesc=true`;
 
-  const [annualRows, monthlyRows, partnerRows, populationGrowth, gdpGrowth] = await Promise.all([
-    rows(annualUrl),
-    monthlyUrl ? optionalRows(monthlyUrl) : Promise.resolve([]),
+  const [annualResults, monthlyResults, partnerRows, populationGrowth, gdpGrowth] = await Promise.all([
+    rowsByPeriod("A", historyYears, reporter, hs),
+    rowsByPeriod("M", monthlyPeriods, reporter, hs),
     optionalRows(partnerUrl),
     indicator(iso2, "SP.POP.GROW"),
     indicator(iso2, "NY.GDP.MKTP.KD.ZG"),
   ]);
 
-  const annual = annualYears.map((period) => {
-    const found = annualRows.filter((r) => String(r.period) === period);
-    return { period, value: found.reduce((sum, r) => sum + (r.primaryValue || 0), 0), netWeightKg: found.reduce((sum, r) => sum + (r.netWgt || 0), 0), status: found.length ? (found.every((r) => r.isReported !== false) ? "official" : "official-estimated") : "not-reported" };
-  });
+  if (annualResults.every((r) => r.failed)) throw new Error("source unavailable");
+  const annualRows = annualResults.flatMap((r) => r.rows);
+  const monthlyRows = monthlyResults.flatMap((r) => r.rows);
+  const history = annualResults.map(({ period, rows: found, failed }) => ({
+    period,
+    value: found.reduce((sum, r) => sum + (r.primaryValue || 0), 0),
+    netWeightKg: found.reduce((sum, r) => sum + (r.netWgt || 0), 0),
+    status: failed ? "fetch-failed" : found.length ? (found.every((r) => r.isReported !== false) ? "official" : "official-estimated") : "not-reported",
+  }));
+  const annual = history.slice(-DISPLAY_YEARS);
+  const failedAnnual = annual.filter((a) => a.status === "fetch-failed").length;
+  const failedMonthly = monthlyResults.filter((r) => r.failed).length;
+  const timesfm = await forecastAnnualImports(history, year + 1);
   const active = annual.filter((x) => x.value > 0);
   const currentValue = monthlyRows.reduce((sum, r) => sum + (r.primaryValue || 0), 0);
   const monthsReported = new Set(monthlyRows.map((r) => String(r.period))).size;
@@ -115,6 +176,7 @@ async function computeImportIntelligence(country: string, hs: string): Promise<I
     product: annualRows[0]?.cmdDesc || `HS ${hs}`,
     annual,
     current: { year, monthsReported, value: currentValue, annualizedValue: annualizedCurrent, status: monthsReported ? "official-monthly" : "not-yet-reported" },
+    timesfm,
     outlook: { nextYear: year + 1, value: forecast, direction, growthRate: forecastRate, confidence, method: "Projection combining historical import growth, recent monthly momentum, population growth and real GDP growth", drivers: { populationGrowth, gdpGrowth } },
     supply: { period: year - 1, worldImports, africanSuppliers, status: africanSuppliers.length ? "official-recorded-supply" : "no-african-supplier-record-returned" },
     sources: [
@@ -124,7 +186,14 @@ async function computeImportIntelligence(country: string, hs: string): Promise<I
       { name: "FAOSTAT", type: "agricultural production and food balances", url: "https://www.fao.org/faostat/en/" },
       { name: "AfCFTA Secretariat", type: "continental trade rules", url: "https://www.africancfta.org/" },
     ],
-    warnings: ["Future demand is a projection, not a purchase order.", "Missing official records do not prove that no formal or informal imports occurred.", "Current-year values cover only months returned by the reporting country."],
+    warnings: [
+      "Future demand is a projection, not a purchase order.",
+      "Missing official records do not prove that no formal or informal imports occurred.",
+      "Current-year values cover only months returned by the reporting country.",
+      ...(timesfm.status === "ok" ? ["The TimesFM range is a statistical interval around past reporting. It cannot anticipate policy changes, shocks, or buyer decisions."] : []),
+      ...(failedAnnual ? [`${failedAnnual} annual period(s) could not be retrieved from UN Comtrade (rate limit or outage) and are shown as fetch-failed, not as zero imports.`] : []),
+      ...(failedMonthly ? [`${failedMonthly} monthly period(s) could not be retrieved from UN Comtrade, so the current-year pace may be understated.`] : []),
+    ],
     cache: { status: "live", retrievedAt: new Date().toISOString() },
   };
 }
@@ -134,7 +203,7 @@ async function persistSourceRecords(intel: ImportIntelligence): Promise<void> {
   const now = new Date().toISOString();
   const comtradeUrl = intel.sources[0]?.url || "";
   const rowsToInsert = [
-    ...intel.annual.filter((a) => a.status !== "not-reported").map((a) => ({
+    ...intel.annual.filter((a) => a.status !== "not-reported" && a.status !== "fetch-failed").map((a) => ({
       sourceOrganization: "UN Comtrade", sourceUrl: comtradeUrl, reportingCountry: intel.country, hsCode: intel.hs, period: a.period, metric: "import_value_usd", value: a.value, unit: "USD",
       evidenceCategory: a.status === "official" ? ("official" as const) : ("estimated" as const), methodology: "Annual reported imports, HS6 aggregate", limitations: "", retrievedAt: now,
     })),
@@ -145,12 +214,21 @@ async function persistSourceRecords(intel: ImportIntelligence): Promise<void> {
     { sourceOrganization: "World Bank Open Data", sourceUrl: intel.outlook.drivers.populationGrowth.url, reportingCountry: intel.country, hsCode: "", period: intel.outlook.drivers.populationGrowth.period, metric: "population_growth_pct", value: intel.outlook.drivers.populationGrowth.value, unit: "%", evidenceCategory: "official" as const, methodology: "SP.POP.GROW", limitations: "", retrievedAt: now },
     { sourceOrganization: "World Bank Open Data", sourceUrl: intel.outlook.drivers.gdpGrowth.url, reportingCountry: intel.country, hsCode: "", period: intel.outlook.drivers.gdpGrowth.period, metric: "gdp_growth_pct", value: intel.outlook.drivers.gdpGrowth.value, unit: "%", evidenceCategory: "official" as const, methodology: "NY.GDP.MKTP.KD.ZG", limitations: "", retrievedAt: now },
     { sourceOrganization: "TradeSafe Africa forecast model", sourceUrl: "", reportingCountry: intel.country, hsCode: intel.hs, period: String(intel.outlook.nextYear), metric: "forecast_import_value_usd", value: intel.outlook.value, unit: "USD", evidenceCategory: "forecast" as const, confidence: intel.outlook.confidence, methodology: intel.outlook.method, limitations: "Model output, not a reported figure.", retrievedAt: now },
+    ...(intel.timesfm?.status === "ok" ? [{
+      sourceOrganization: "TimesFM 2.5 (Google Research)", sourceUrl: "https://huggingface.co/google/timesfm-2.5-200m-pytorch", reportingCountry: intel.country, hsCode: intel.hs, period: String(intel.timesfm.nextYear), metric: "forecast_import_value_usd_timesfm", value: intel.timesfm.value, unit: "USD",
+      evidenceCategory: "forecast" as const, methodology: `Zero-shot forecast from ${intel.timesfm.observations} reported annual values through ${intel.timesfm.lastObservedYear}`,
+      limitations: `80% interval ${Math.round(intel.timesfm.low)} to ${Math.round(intel.timesfm.high)} USD. Model output, not a reported figure.`, retrievedAt: now,
+    }] : []),
     ...intel.supply.africanSuppliers.map((s) => ({
       sourceOrganization: "UN Comtrade", sourceUrl: comtradeUrl, reportingCountry: intel.country, partnerCountry: s.country, hsCode: intel.hs, period: String(intel.supply.period), metric: "import_value_usd_from_partner", value: s.value, unit: "USD",
       evidenceCategory: "official" as const, methodology: "Partner-level annual imports", limitations: "", retrievedAt: now,
     })),
   ];
-  if (rowsToInsert.length) await db.insert(sourceRecords).values(rowsToInsert);
+  // D1 allows at most 100 bound parameters per statement and each source
+  // record binds ~14, so a full intelligence result must go in in chunks.
+  for (let i = 0; i < rowsToInsert.length; i += SOURCE_RECORDS_PER_INSERT) {
+    await db.insert(sourceRecords).values(rowsToInsert.slice(i, i + SOURCE_RECORDS_PER_INSERT));
+  }
 }
 
 async function readSnapshot(country: string, hs: string): Promise<ImportIntelligence | null> {
@@ -161,6 +239,7 @@ async function readSnapshot(country: string, hs: string): Promise<ImportIntellig
   if (ageMs > SNAPSHOT_FRESH_MS) return null;
   try {
     const parsed = JSON.parse(snap.responseJson) as ImportIntelligence;
+    if (parsed.timesfm?.status === "unavailable" && ageMs > SNAPSHOT_RETRY_TIMESFM_MS) return null;
     return { ...parsed, cache: { status: "cached", retrievedAt: snap.retrievedAt } };
   } catch {
     return null;

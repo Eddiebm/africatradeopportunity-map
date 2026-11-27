@@ -48,3 +48,8 @@ RESEND_API_KEY=
 # (onboarding@resend.dev), which can only deliver to the Resend account
 # owner's own address, not to arbitrary real users.
 EMAIL_FROM=
+
+# Bearer token for the TimesFM forecasting service. TIMESFM_URL is a var in
+# wrangler.jsonc. Leave unset locally: the import-intelligence page then
+# omits the TimesFM forecast and keeps the heuristic outlook.
+TIMESFM_TOKEN=
